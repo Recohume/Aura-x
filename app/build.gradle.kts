@@ -7,14 +7,21 @@ plugins {
 
 android {
     namespace = "com.auramusic.app"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.auramusic.kotlin"
         minSdk = 26
-        targetSdk = 35
-        versionCode = 1
-        versionName = "2.0.0-simpmusic"
+        targetSdk = 36
+
+        // Dynamic version code & name: CI build run number or Gradle parameter with local defaults
+        val ciVersionCode = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull()
+        val propVersionCode = (project.findProperty("versionCode") as? String)?.toIntOrNull()
+        versionCode = propVersionCode ?: ciVersionCode ?: 1
+
+        val propVersionName = project.findProperty("versionName") as? String
+        val envVersionName = System.getenv("APP_VERSION_NAME")
+        versionName = propVersionName ?: envVersionName ?: "1.2"
 
         vectorDrawables {
             useSupportLibrary = true
@@ -33,12 +40,12 @@ android {
 
     compileOptions {
         isCoreLibraryDesugaringEnabled = true
-        sourceCompatibility = JavaVersion.VERSION_17
-        targetCompatibility = JavaVersion.VERSION_17
+        sourceCompatibility = JavaVersion.VERSION_21
+        targetCompatibility = JavaVersion.VERSION_21
     }
 
     kotlinOptions {
-        jvmTarget = "17"
+        jvmTarget = "21"
     }
 
     buildFeatures {
@@ -51,6 +58,14 @@ android {
             excludes += "META-INF/DEPENDENCIES"
             excludes += "META-INF/INDEX.LIST"
         }
+    }
+
+    applicationVariants.all {
+        val variant = this
+        outputs.map { it as com.android.build.gradle.internal.api.BaseVariantOutputImpl }
+            .forEach { output ->
+                output.outputFileName = "aura-music-v${variant.versionName}-universal.apk"
+            }
     }
 }
 

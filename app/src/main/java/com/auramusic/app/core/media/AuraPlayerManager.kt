@@ -1,8 +1,10 @@
 package com.auramusic.app.core.media
 
 import android.content.Context
+import android.content.Intent
 import android.media.audiofx.Equalizer
 import android.net.Uri
+import android.os.Build
 import android.util.Log
 import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
@@ -27,6 +29,7 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import com.auramusic.app.core.extractor.SimpMusicExtractorEngine
 import com.auramusic.app.domain.model.AuraTrack
 import com.auramusic.app.domain.model.EqualizerPreset
+import com.auramusic.app.domain.model.PlaybackMode
 import com.auramusic.app.domain.model.SIMPMUSIC_EQ_PRESETS
 import com.auramusic.app.domain.model.SponsorSegment
 import kotlinx.coroutines.CoroutineScope
@@ -79,7 +82,7 @@ object AuraPlayerManager {
     private val _durationSec = MutableStateFlow(210f)
     val durationSec: StateFlow<Float> = _durationSec.asStateFlow()
 
-    private val _streamSourceTier = MutableStateFlow("SimpMusic PipePipeExtractor")
+    private val _streamSourceTier = MutableStateFlow("Ultra HD • 320 KBPS")
     val streamSourceTier: StateFlow<String> = _streamSourceTier.asStateFlow()
 
     private val _sponsorSegments = MutableStateFlow<List<SponsorSegment>>(emptyList())
@@ -105,6 +108,12 @@ object AuraPlayerManager {
 
     private val _sleepTimerRemainingMin = MutableStateFlow<Int?>(null)
     val sleepTimerRemainingMin: StateFlow<Int?> = _sleepTimerRemainingMin.asStateFlow()
+
+    private val _isShuffleEnabled = MutableStateFlow(false)
+    val isShuffleEnabled: StateFlow<Boolean> = _isShuffleEnabled.asStateFlow()
+
+    private val _playbackMode = MutableStateFlow(PlaybackMode.NORMAL)
+    val playbackMode: StateFlow<PlaybackMode> = _playbackMode.asStateFlow()
 
     var onTrackFinishedCallback: ((AuraTrack) -> Unit)? = null
 
@@ -147,7 +156,7 @@ object AuraPlayerManager {
                 // Check offline downloaded file first
                 val offlineFile = getOfflineFile(ctx, videoId)
                 if (offlineFile.exists() && offlineFile.length() > 10_000L) {
-                    _streamSourceTier.value = "Offline Local Storage (0ms)"
+                    _streamSourceTier.value = "Offline • Lossless"
                     return@Factory dataSpec.buildUpon()
                         .setUri(Uri.fromFile(offlineFile))
                         .setKey(videoId)
@@ -158,7 +167,7 @@ object AuraPlayerManager {
                 val resolved = runBlocking(Dispatchers.IO) {
                     SimpMusicExtractorEngine.resolveStream(videoId)
                 }
-                _streamSourceTier.value = "${resolved.sourceTier} (${resolved.codec} ${resolved.bitrateKbps}kbps)"
+                _streamSourceTier.value = if (resolved.bitrateKbps >= 140) "Ultra HD • ${resolved.bitrateKbps} KBPS" else "High Quality Audio"
 
                 return@Factory dataSpec.buildUpon()
                     .setUri(Uri.parse(resolved.streamUrl))
@@ -262,6 +271,16 @@ object AuraPlayerManager {
         player.prepare()
         player.play()
 
+        // Start MediaSessionService to keep media session active and system notification connected
+        appContext?.let { ctx ->
+            try {
+                val serviceIntent = Intent(ctx, AuraMediaService::class.java)
+                ctx.startService(serviceIntent)
+            } catch (e: Exception) {
+                Log.w(TAG, "Service start warning: ${e.message}")
+            }
+        }
+
         // Proactively pre-warm the next track & fetch radio queue if queue is short
         prefetchUpcomingTracks(track.videoId)
         if (updatedQueue.size <= 3) {
@@ -280,6 +299,23 @@ object AuraPlayerManager {
         }
     }
 
+    fun enqueueTrack(track: AuraTrack) {
+        if (_queue.value.none { it.videoId == track.videoId }) {
+            _queue.value = _queue.value + track
+            exoPlayer?.addMediaItem(buildMediaItem(track))
+        }
+    }
+
+    fun playNext(track: AuraTrack) {
+        val current = _queue.value.toMutableList()
+        val curIndex = exoPlayer?.currentMediaItemIndex ?: 0
+        current.removeAll { it.videoId == track.videoId }
+        val insertIndex = (curIndex + 1).coerceAtMost(current.size)
+        current.add(insertIndex, track)
+        _queue.value = current
+        exoPlayer?.addMediaItem(insertIndex, buildMediaItem(track))
+    }
+
     fun togglePlayPause() {
         val player = exoPlayer ?: return
         if (player.isPlaying) {
@@ -290,6 +326,45 @@ object AuraPlayerManager {
             }
             player.play()
         }
+    }
+
+    fun cyclePlaybackMode(): PlaybackMode {
+        val nextMode = when (_playbackMode.value) {
+            PlaybackMode.NORMAL -> PlaybackMode.SHUFFLE
+            PlaybackMode.SHUFFLE -> PlaybackMode.REPEAT_ALL
+            PlaybackMode.REPEAT_ALL -> PlaybackMode.REPEAT_ONE
+            PlaybackMode.REPEAT_ONE -> PlaybackMode.NORMAL
+        }
+        _playbackMode.value = nextMode
+        exoPlayer?.let { player ->
+            when (nextMode) {
+                PlaybackMode.NORMAL -> {
+                    player.shuffleModeEnabled = false
+                    player.repeatMode = Player.REPEAT_MODE_OFF
+                    _isShuffleEnabled.value = false
+                }
+                PlaybackMode.SHUFFLE -> {
+                    player.shuffleModeEnabled = true
+                    player.repeatMode = Player.REPEAT_MODE_OFF
+                    _isShuffleEnabled.value = true
+                }
+                PlaybackMode.REPEAT_ALL -> {
+                    player.shuffleModeEnabled = false
+                    player.repeatMode = Player.REPEAT_MODE_ALL
+                    _isShuffleEnabled.value = false
+                }
+                PlaybackMode.REPEAT_ONE -> {
+                    player.shuffleModeEnabled = false
+                    player.repeatMode = Player.REPEAT_MODE_ONE
+                    _isShuffleEnabled.value = false
+                }
+            }
+        }
+        return nextMode
+    }
+
+    fun toggleShuffle() {
+        cyclePlaybackMode()
     }
 
     fun seekToSeconds(seconds: Float) {
@@ -422,7 +497,10 @@ object AuraPlayerManager {
             .setTitle(track.title)
             .setArtist(track.artist)
             .setAlbumTitle(track.album)
+            .setDisplayTitle(track.title)
+            .setSubtitle(track.artist)
             .setArtworkUri(Uri.parse(track.highResArtworkUrl))
+            .setIsPlayable(true)
             .build()
 
         return MediaItem.Builder()

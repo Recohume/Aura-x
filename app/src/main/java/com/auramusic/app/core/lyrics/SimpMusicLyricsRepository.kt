@@ -64,9 +64,9 @@ object SimpMusicLyricsRepository {
                     }
                 }
 
-                val richLrc = bestObj.optString("richSyncLyrics")
-                val syncedLrc = bestObj.optString("syncedLyrics")
-                val plain = bestObj.optString("plainLyric")
+                val richLrc = unescapeLyricsHtml(bestObj.optString("richSyncLyrics"))
+                val syncedLrc = unescapeLyricsHtml(bestObj.optString("syncedLyrics"))
+                val plain = unescapeLyricsHtml(bestObj.optString("plainLyric"))
 
                 val rawToParse = if (richLrc.isNotBlank()) richLrc else syncedLrc
                 val lines = if (rawToParse.isNotBlank()) parseLrcWithRichWords(rawToParse) else emptyList()
@@ -109,8 +109,8 @@ object SimpMusicLyricsRepository {
                     }
                 }
 
-                val synced = chosen.optString("syncedLyrics")
-                val plain = chosen.optString("plainLyrics")
+                val synced = unescapeLyricsHtml(chosen.optString("syncedLyrics"))
+                val plain = unescapeLyricsHtml(chosen.optString("plainLyrics"))
                 val lines = if (synced.isNotBlank()) parseLrcWithRichWords(synced) else emptyList()
                 if (lines.isEmpty() && plain.isBlank()) return null
 
@@ -162,7 +162,7 @@ object SimpMusicLyricsRepository {
                     val wSec = wm.groupValues[2].toIntOrNull() ?: 0
                     val wMs = wm.groupValues[3].padEnd(3, '0').toIntOrNull() ?: 0
                     val wStart = wMin * 60f + wSec + (wMs / 1000f)
-                    wStart to wm.groupValues[4].trim()
+                    wStart to unescapeLyricsHtml(wm.groupValues[4].trim())
                 }.filter { it.second.isNotEmpty() }
 
                 for (wIdx in parsedWords.indices) {
@@ -178,7 +178,8 @@ object SimpMusicLyricsRepository {
                 }
                 cleanText = parsedWords.joinToString(" ") { it.second }
             } else {
-                cleanText = raw.rawContent.replace(Regex("<[^>]+>"), "").trim()
+                val rawNoTags = raw.rawContent.replace(Regex("<[^>]+>"), "").trim()
+                cleanText = unescapeLyricsHtml(rawNoTags)
                 if (cleanText.isNotEmpty()) {
                     val splitTokens = cleanText.split(Regex("\\s+")).filter { it.isNotBlank() }
                     val durationSpan = (lineEndSec - raw.startSec).coerceAtLeast(0.5f)
@@ -206,6 +207,40 @@ object SimpMusicLyricsRepository {
                 romanizedText = romanizeIfNonLatin(cleanText)
             )
         }
+    }
+
+    /**
+     * Unescapes HTML entities commonly found in lyrics databases (e.g. &#x27; for apostrophe, &quot;, &amp;, etc.)
+     */
+    fun unescapeLyricsHtml(text: String): String {
+        if (!text.contains("&")) return text
+        var res = text
+        // 1. Hexadecimal numeric entities (e.g. &#x27; -> ', &#x2F; -> /)
+        res = Regex("&#x([0-9a-fA-F]+);").replace(res) { match ->
+            val code = match.groupValues[1].toIntOrNull(16)
+            if (code != null) code.toChar().toString() else match.value
+        }
+        // 2. Decimal numeric entities (e.g. &#39; -> ', &#8217; -> ’, &#8216; -> ‘)
+        res = Regex("&#([0-9]+);").replace(res) { match ->
+            val code = match.groupValues[1].toIntOrNull()
+            if (code != null) code.toChar().toString() else match.value
+        }
+        // 3. Standard named XML/HTML entities
+        res = res
+            .replace("&quot;", "\"")
+            .replace("&apos;", "'")
+            .replace("&amp;", "&")
+            .replace("&lt;", "<")
+            .replace("&gt;", ">")
+            .replace("&nbsp;", " ")
+            .replace("&hellip;", "…")
+            .replace("&mdash;", "—")
+            .replace("&ndash;", "–")
+            .replace("&rsquo;", "’")
+            .replace("&lsquo;", "‘")
+            .replace("&rdquo;", "”")
+            .replace("&ldquo;", "“")
+        return res
     }
 
     /**

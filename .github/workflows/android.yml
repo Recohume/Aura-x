@@ -1,0 +1,176 @@
+name: Build & Release APK
+
+on:
+  push:
+    branches: [ "main", "master", "dev" ]
+    tags:
+      - 'v*'
+    paths-ignore:
+      - 'README.md'
+      - '.github/ISSUE_TEMPLATE/**'
+  pull_request:
+    branches: [ "main", "master", "dev" ]
+    paths-ignore:
+      - 'README.md'
+      - '.github/ISSUE_TEMPLATE/**'
+  workflow_dispatch:
+    inputs:
+      create_release:
+        description: 'Publish as a formal GitHub Release'
+        required: true
+        type: boolean
+        default: false
+      prerelease:
+        description: 'Mark release as pre-release'
+        required: false
+        type: boolean
+        default: false
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  build-release:
+    name: Build Universal Release APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: 'gradle'
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x ./gradlew
+
+      - name: Extract & validate app version
+        id: get_version
+        shell: bash
+        run: |
+          RAW_VERSION=$(grep -o 'versionName = "[^"]*"' app/build.gradle.kts | cut -d'"' -f2 || true)
+          if [ -z "$RAW_VERSION" ]; then
+            RAW_VERSION="1.2"
+          fi
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            TAG_VERSION="${GITHUB_REF#refs/tags/}"
+            RAW_VERSION="${TAG_VERSION#v}"
+          else
+            TAG_VERSION="v${RAW_VERSION}"
+          fi
+          echo "VERSION=${TAG_VERSION}" >> $GITHUB_ENV
+          echo "RAW_VERSION=${RAW_VERSION}" >> $GITHUB_ENV
+          echo "Target App Version: ${TAG_VERSION} (Raw: ${RAW_VERSION})"
+
+      - name: Enforce mandatory release documentation
+        shell: bash
+        run: |
+          DOC_FILE="release-docs/v${RAW_VERSION}.md"
+          echo "Verifying mandatory release documentation at ${DOC_FILE}..."
+          if [ ! -f "${DOC_FILE}" ]; then
+            echo "::error::Missing mandatory release documentation: ${DOC_FILE}"
+            echo "Every release requires a corresponding release-docs/v<version>.md document."
+            exit 1
+          fi
+          echo "Release doc verified successfully: ${DOC_FILE}"
+          echo "RELEASE_DOC_PATH=${DOC_FILE}" >> $GITHUB_ENV
+
+      - name: Setup signing keystore
+        shell: bash
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "Using repository signing secret..."
+            echo "$KEYSTORE_BASE64" | base64 -d > release.jks
+            echo "KEYSTORE_FILE=release.jks" >> $GITHUB_ENV
+            echo "KEY_ALIAS=${KEY_ALIAS}" >> $GITHUB_ENV
+            echo "KEYSTORE_PASS=${KEYSTORE_PASSWORD}" >> $GITHUB_ENV
+            echo "KEY_PASS=${KEY_PASSWORD}" >> $GITHUB_ENV
+          else
+            echo "Generating release keystore for universal production APK signing..."
+            keytool -genkey -v -keystore release.jks -alias auramusic -keyalg RSA -keysize 2048 -validity 10000 \
+              -dname "CN=AURA Music, OU=Mobile Engineering, O=AURA, L=Global, S=Global, C=US" \
+              -storepass aurarelease2026 -keypass aurarelease2026
+            echo "KEYSTORE_FILE=release.jks" >> $GITHUB_ENV
+            echo "KEY_ALIAS=auramusic" >> $GITHUB_ENV
+            echo "KEYSTORE_PASS=aurarelease2026" >> $GITHUB_ENV
+            echo "KEY_PASS=aurarelease2026" >> $GITHUB_ENV
+          fi
+
+      - name: Build Release APK with Gradle
+        run: ./gradlew assembleRelease -PversionCode=${{ github.run_number }} -PversionName=${{ env.RAW_VERSION }} --stacktrace
+
+      - name: Align, sign & package universal APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          BUILD_TOOLS=$(ls -d $ANDROID_HOME/build-tools/* | sort -V | tail -n 1)
+          echo "Using Android Build Tools: $BUILD_TOOLS"
+          
+          RAW_APK=$(find app/build/outputs/apk/release -name "*.apk" | head -n 1)
+          if [ -z "$RAW_APK" ]; then
+            echo "Error: Release APK was not found under app/build/outputs/apk/release"
+            exit 1
+          fi
+
+          mkdir -p dist
+          FINAL_NAME="aura-music-${VERSION}-universal.apk"
+          
+          # ZipAlign
+          $BUILD_TOOLS/zipalign -v -p 4 "$RAW_APK" dist/aligned.apk
+          
+          # Apksigner
+          $BUILD_TOOLS/apksigner sign \
+            --ks "$KEYSTORE_FILE" \
+            --ks-key-alias "$KEY_ALIAS" \
+            --ks-pass "pass:$KEYSTORE_PASS" \
+            --key-pass "pass:$KEY_PASS" \
+            --out "dist/${FINAL_NAME}" \
+            dist/aligned.apk
+          
+          rm -f dist/aligned.apk
+          
+          # Verify signature
+          $BUILD_TOOLS/apksigner verify --verbose "dist/${FINAL_NAME}"
+          
+          # Generate SHA-256 Checksum
+          ( cd dist && sha256sum "${FINAL_NAME}" > "${FINAL_NAME}.sha256" )
+          
+          echo "Successfully packaged universal release APK:"
+          ls -lh dist/
+
+      - name: Upload APK & Checksum to GitHub Run Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: aura-music-${{ env.VERSION }}-universal
+          path: dist/*
+          retention-days: 30
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v') || github.event.inputs.create_release == true
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Aura ${{ env.VERSION }}
+          tag_name: ${{ env.VERSION }}
+          body_path: ${{ env.RELEASE_DOC_PATH }}
+          draft: false
+          prerelease: ${{ github.event.inputs.prerelease || false }}
+          files: |
+            dist/aura-music-${{ env.VERSION }}-universal.apk
+            dist/aura-music-${{ env.VERSION }}-universal.apk.sha256
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

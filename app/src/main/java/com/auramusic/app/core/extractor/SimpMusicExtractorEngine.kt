@@ -1,18 +1,25 @@
 package com.auramusic.app.core.extractor
 
 import android.util.Log
+import com.auramusic.app.domain.model.ArtistDetail
+import com.auramusic.app.domain.model.ArtistSong
 import com.auramusic.app.domain.model.AuraPlaylist
 import com.auramusic.app.domain.model.AuraTrack
 import com.auramusic.app.domain.model.MoodCategory
+import com.auramusic.app.domain.model.PlaylistDetail
+import com.auramusic.app.domain.model.PlaylistTrackItem
 import com.auramusic.app.domain.model.YtmChartSection
+import com.auramusic.app.domain.model.YtmCommunityPlaylist
+import com.auramusic.app.domain.model.YtmTopArtist
 import dev.maxrave.pipepipe.extractor.NewPipe as PipePipe
 import dev.maxrave.pipepipe.extractor.ServiceList as PipePipeServiceList
+import dev.maxrave.pipepipe.extractor.downloader.CancellableCall as PipePipeCancellableCall
 import dev.maxrave.pipepipe.extractor.downloader.Downloader as PipePipeDownloader
 import dev.maxrave.pipepipe.extractor.downloader.Request as PipePipeRequest
 import dev.maxrave.pipepipe.extractor.downloader.Response as PipePipeResponse
 import dev.maxrave.pipepipe.extractor.exceptions.ReCaptchaException as PipePipeReCaptchaException
 import dev.maxrave.pipepipe.extractor.services.youtube.YoutubeApiDecoder
-import dev.maxrave.pipepipe.extractor.services.youtube.extractor.YoutubeStreamExtractor
+import dev.maxrave.pipepipe.extractor.stream.StreamInfo as PipePipeStreamInfo
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -34,8 +41,9 @@ import org.schabi.newpipe.extractor.downloader.Response as BraveResponse
 import org.schabi.newpipe.extractor.exceptions.ReCaptchaException as BraveReCaptchaException
 import org.schabi.newpipe.extractor.localization.ContentCountry
 import org.schabi.newpipe.extractor.localization.Localization
-import org.schabi.newpipe.extractor.stream.StreamInfo
+import org.schabi.newpipe.extractor.stream.StreamInfo as BraveStreamInfo
 import org.schabi.newpipe.extractor.stream.StreamInfoItem
+import java.io.IOException
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 
@@ -90,7 +98,7 @@ object SimpMusicExtractorEngine {
                 // 1. Initialize SimpMusic PipePipeExtractor (uses api.pipepipe.dev remote decoder when localDecoder is null)
                 YoutubeApiDecoder.setLocalDecoder(null)
                 PipePipe.init(object : PipePipeDownloader() {
-                    override fun execute(request: PipePipeRequest): PipePipeResponse {
+                    private fun buildOkHttpReq(request: PipePipeRequest): Request {
                         val builder = Request.Builder()
                             .url(request.url())
                             .header("User-Agent", USER_AGENT)
@@ -101,20 +109,60 @@ object SimpMusicExtractorEngine {
                         val bodyBytes = request.dataToSend()
                         val reqBody = bodyBytes?.toRequestBody(null, 0, bodyBytes.size)
                         builder.method(request.httpMethod(), reqBody)
+                        return builder.build()
+                    }
 
-                        httpClient.newCall(builder.build()).execute().use { resp ->
+                    private fun okhttp3.Response.toPipePipeResponse(): PipePipeResponse {
+                        val rawBytes = body?.bytes() ?: ByteArray(0)
+                        return PipePipeResponse(
+                            code,
+                            message,
+                            headers.toMultimap(),
+                            rawBytes.toString(Charsets.UTF_8),
+                            rawBytes,
+                            request.url.toString()
+                        )
+                    }
+
+                    override fun execute(request: PipePipeRequest): PipePipeResponse {
+                        httpClient.newCall(buildOkHttpReq(request)).execute().use { resp ->
                             if (resp.code == 429) {
                                 throw PipePipeReCaptchaException("reCaptcha Challenge requested", request.url())
                             }
-                            val bodyStr = resp.body?.string() ?: ""
-                            return PipePipeResponse(
-                                resp.code,
-                                resp.message,
-                                resp.headers.toMultimap(),
-                                bodyStr,
-                                resp.request.url.toString()
-                            )
+                            return resp.toPipePipeResponse()
                         }
+                    }
+
+                    override fun executeAsync(
+                        request: PipePipeRequest,
+                        callback: AsyncCallback?
+                    ): PipePipeCancellableCall {
+                        val call = httpClient.newCall(buildOkHttpReq(request))
+                        val cancellable = PipePipeCancellableCall(call)
+                        call.enqueue(object : okhttp3.Callback {
+                            override fun onFailure(call: okhttp3.Call, e: IOException) {
+                                cancellable.setFinished()
+                                callback?.onError(e)
+                            }
+
+                            override fun onResponse(call: okhttp3.Call, response: okhttp3.Response) {
+                                try {
+                                    if (response.code == 429) {
+                                        response.close()
+                                        callback?.onError(
+                                            PipePipeReCaptchaException("reCaptcha Challenge requested", request.url())
+                                        )
+                                        return
+                                    }
+                                    callback?.onSuccess(response.toPipePipeResponse())
+                                } catch (e: Exception) {
+                                    callback?.onError(e)
+                                } finally {
+                                    cancellable.setFinished()
+                                }
+                            }
+                        })
+                        return cancellable
                     }
                 })
             } catch (e: Exception) {
@@ -213,7 +261,7 @@ object SimpMusicExtractorEngine {
     /**
      * Multi-tier SimpMusic stream extraction:
      * Tier 0: Memory cache (0ms)
-     * Tier 1: PipePipeExtractor (SimpMusic official engine + remote/local cipher)
+     * Tier 1: PipePipeExtractor (SimpMusic official engine + api.pipepipe.dev cipher)
      * Tier 2: BraveNewPipe Extractor (SmartTube engine)
      * Tier 3: Fast pre-warmed Invidious/Piped local=true proxy stream (~230ms)
      */
@@ -222,12 +270,12 @@ object SimpMusicExtractorEngine {
 
         getCachedStream(videoId)?.let { return@withContext it }
 
-        // Tier 1: PipePipeExtractor
+        // Tier 1: PipePipeExtractor (SimpMusic)
         try {
+            YoutubeApiDecoder.setLocalDecoder(null)
             val url = "https://music.youtube.com/watch?v=$videoId"
-            val extractor = PipePipeServiceList.YouTube.getStreamExtractor(url) as YoutubeStreamExtractor
-            extractor.fetchPage()
-            val audioStreams = extractor.audioStreams
+            val streamInfo = PipePipeStreamInfo.getInfo(PipePipeServiceList.YouTube, url)
+            val audioStreams = streamInfo.audioStreams
             if (!audioStreams.isNullOrEmpty()) {
                 val bestM4a = audioStreams
                     .filter { it.format?.suffix?.equals("m4a", ignoreCase = true) == true }
@@ -242,7 +290,7 @@ object SimpMusicExtractorEngine {
                         mimeType = selected.format?.mimeType ?: "audio/mp4",
                         bitrateKbps = selected.averageBitrate.takeIf { it > 0 } ?: 160,
                         codec = if (selected.format?.suffix == "m4a") "AAC" else "OPUS",
-                        durationSeconds = extractor.length.toInt().coerceAtLeast(0),
+                        durationSeconds = streamInfo.duration.toInt().coerceAtLeast(0),
                         sourceTier = "PipePipeExtractor (SimpMusic Native)"
                     )
                     streamCache[videoId] = resolved
@@ -257,7 +305,7 @@ object SimpMusicExtractorEngine {
         // Tier 2: BraveNewPipe Extractor
         try {
             val url = "https://www.youtube.com/watch?v=$videoId"
-            val streamInfo = StreamInfo.getInfo(BraveServiceList.YouTube, url)
+            val streamInfo = BraveStreamInfo.getInfo(BraveServiceList.YouTube, url)
             val audioStreams = streamInfo.audioStreams
             if (!audioStreams.isNullOrEmpty()) {
                 val bestM4a = audioStreams
@@ -538,6 +586,637 @@ object SimpMusicExtractorEngine {
         }
 
     /**
+     * Fetches live Global Top Artists from YouTube Music Charts (`FEmusic_charts`).
+     */
+    suspend fun fetchTopArtists(): List<YtmTopArtist> = withContext(Dispatchers.IO) {
+        try {
+            val payload = JSONObject().apply {
+                put("context", JSONObject().apply {
+                    put("client", JSONObject().apply {
+                        put("clientName", "WEB_REMIX")
+                        put("clientVersion", "1.20250312.01.00")
+                        put("hl", "en")
+                        put("gl", "US")
+                    })
+                })
+                put("browseId", "FEmusic_charts")
+            }
+
+            val req = Request.Builder()
+                .url("https://music.youtube.com/youtubei/v1/browse?prettyPrint=false")
+                .header("User-Agent", USER_AGENT)
+                .header("Origin", "https://music.youtube.com")
+                .header("Referer", "https://music.youtube.com/")
+                .post(payload.toString().toRequestBody("application/json".toMediaType()))
+                .build()
+
+            val artists = mutableListOf<YtmTopArtist>()
+            httpClient.newCall(req).execute().use { resp ->
+                if (resp.isSuccessful) {
+                    val root = JSONObject(resp.body?.string() ?: "{}")
+                    val tabs = root.optJSONObject("contents")
+                        ?.optJSONObject("singleColumnBrowseResultsRenderer")
+                        ?.optJSONArray("tabs")
+                    val sectionContents = tabs?.optJSONObject(0)
+                        ?.optJSONObject("tabRenderer")
+                        ?.optJSONObject("content")
+                        ?.optJSONObject("sectionListRenderer")
+                        ?.optJSONArray("contents")
+
+                    if (sectionContents != null) {
+                        for (i in 0 until sectionContents.length()) {
+                            val shelf = sectionContents.optJSONObject(i)?.optJSONObject("musicCarouselShelfRenderer") ?: continue
+                            val title = shelf.optJSONObject("header")
+                                ?.optJSONObject("musicCarouselShelfBasicHeaderRenderer")
+                                ?.optJSONObject("title")
+                                ?.optJSONArray("runs")
+                                ?.optJSONObject(0)
+                                ?.optString("text") ?: ""
+
+                            if (title.contains("Top artists", ignoreCase = true)) {
+                                val items = shelf.optJSONArray("contents") ?: continue
+                                for (j in 0 until items.length()) {
+                                    val item = items.optJSONObject(j)?.optJSONObject("musicResponsiveListItemRenderer") ?: continue
+                                    val name = item.optJSONArray("flexColumns")
+                                        ?.optJSONObject(0)
+                                        ?.optJSONObject("musicResponsiveListItemFlexColumnRenderer")
+                                        ?.optJSONObject("text")
+                                        ?.optJSONArray("runs")
+                                        ?.optJSONObject(0)
+                                        ?.optString("text") ?: ""
+                                    val subs = item.optJSONArray("flexColumns")
+                                        ?.optJSONObject(1)
+                                        ?.optJSONObject("musicResponsiveListItemFlexColumnRenderer")
+                                        ?.optJSONObject("text")
+                                        ?.optJSONArray("runs")
+                                        ?.optJSONObject(0)
+                                        ?.optString("text") ?: ""
+                                    val thumbArr = item.optJSONObject("thumbnail")
+                                        ?.optJSONObject("musicThumbnailRenderer")
+                                        ?.optJSONObject("thumbnail")
+                                        ?.optJSONArray("thumbnails")
+                                    val thumb = thumbArr?.optJSONObject(thumbArr.length() - 1)?.optString("url") ?: ""
+                                    val id = item.optJSONObject("navigationEndpoint")
+                                        ?.optJSONObject("browseEndpoint")
+                                        ?.optString("browseId") ?: "artist_$j"
+
+                                    if (name.isNotBlank()) {
+                                        artists.add(YtmTopArtist(id = id, name = name, subscribers = subs, avatarUrl = thumb))
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (artists.isNotEmpty()) return@withContext artists
+        } catch (e: Exception) {
+            Log.w(TAG, "Error fetching live Top Artists: ${e.message}")
+        }
+
+        listOf(
+            YtmTopArtist("taylor_swift", "Taylor Swift", "63.5M subscribers", "https://yt3.googleusercontent.com/RCpTA6EXJQyjVFDosWOKa2SMmqkua_lA9mHPDWWciLwgqpZLz9fS3xYq9R0_L9kF=s400"),
+            YtmTopArtist("bruno_mars", "Bruno Mars", "44.6M subscribers", "https://lh3.googleusercontent.com/hnefGBrazRhn4Z92bdSZBUENl40ONjRiVDsmZKZh-WZ2iCKE-W_YyJtZ_fL4w=s400"),
+            YtmTopArtist("the_weeknd", "The Weeknd", "36.2M subscribers", "https://lh3.googleusercontent.com/f0uIq9s7qQYV4f_4zB1=s400"),
+            YtmTopArtist("billie_eilish", "Billie Eilish", "52.4M subscribers", "https://lh3.googleusercontent.com/zV8Q8k=s400"),
+            YtmTopArtist("drake", "Drake", "30.1M subscribers", "https://lh3.googleusercontent.com/dK0M_Fh5uQ6s4z7=s400"),
+            YtmTopArtist("sza", "SZA", "8.9M subscribers", "https://lh3.googleusercontent.com/k9_a1=s400"),
+            YtmTopArtist("sabrina_carpenter", "Sabrina Carpenter", "10.5M subscribers", "https://lh3.googleusercontent.com/sc_b2=s400")
+        )
+    }
+
+    /**
+     * Fetches public playlists uploaded by users on YouTube Music (`EgWKAQIQA2oKEAkQBRAKEAMQBA%3D%3D`).
+     */
+    suspend fun fetchCommunityPlaylists(query: String = "Top Hits 2025"): List<YtmCommunityPlaylist> = withContext(Dispatchers.IO) {
+        try {
+            val payload = JSONObject().apply {
+                put("context", JSONObject().apply {
+                    put("client", JSONObject().apply {
+                        put("clientName", "WEB_REMIX")
+                        put("clientVersion", "1.20250312.01.00")
+                        put("hl", "en")
+                        put("gl", "US")
+                    })
+                })
+                put("query", query)
+                put("params", "EgeKAQQoAEABahIQBBAKEAUQDhADEAkQFRAQEBE%3D") // Community Playlists filter
+            }
+
+            val req = Request.Builder()
+                .url("https://music.youtube.com/youtubei/v1/search?prettyPrint=false")
+                .header("User-Agent", USER_AGENT)
+                .header("Origin", "https://music.youtube.com")
+                .header("Referer", "https://music.youtube.com/")
+                .post(payload.toString().toRequestBody("application/json".toMediaType()))
+                .build()
+
+            val playlists = mutableListOf<YtmCommunityPlaylist>()
+            httpClient.newCall(req).execute().use { resp ->
+                if (resp.isSuccessful) {
+                    val root = JSONObject(resp.body?.string() ?: "{}")
+                    val tabs = root.optJSONObject("contents")
+                        ?.optJSONObject("tabbedSearchResultsRenderer")
+                        ?.optJSONArray("tabs")
+                    val sectionContents = tabs?.optJSONObject(0)
+                        ?.optJSONObject("tabRenderer")
+                        ?.optJSONObject("content")
+                        ?.optJSONObject("sectionListRenderer")
+                        ?.optJSONArray("contents")
+
+                    val shelf = sectionContents?.optJSONObject(0)?.optJSONObject("musicShelfRenderer")
+                    val items = shelf?.optJSONArray("contents")
+                    if (items != null) {
+                        for (i in 0 until items.length()) {
+                            val item = items.optJSONObject(i)?.optJSONObject("musicResponsiveListItemRenderer") ?: continue
+                            val flexCols = item.optJSONArray("flexColumns") ?: continue
+                            val title = flexCols.optJSONObject(0)
+                                ?.optJSONObject("musicResponsiveListItemFlexColumnRenderer")
+                                ?.optJSONObject("text")
+                                ?.optJSONArray("runs")
+                                ?.optJSONObject(0)
+                                ?.optString("text") ?: ""
+
+                            val flexCol1Runs = flexCols.optJSONObject(1)
+                                ?.optJSONObject("musicResponsiveListItemFlexColumnRenderer")
+                                ?.optJSONObject("text")
+                                ?.optJSONArray("runs")
+
+                            var author = "Community Playlist"
+                            var count = "Playlist"
+                            if (flexCol1Runs != null) {
+                                val textList = mutableListOf<String>()
+                                for (r in 0 until flexCol1Runs.length()) {
+                                    val t = flexCol1Runs.optJSONObject(r)?.optString("text")?.trim() ?: ""
+                                    if (t.isNotEmpty() && t != "•") textList.add(t)
+                                }
+                                if (textList.size >= 2) {
+                                    author = textList[1]
+                                    count = textList.getOrNull(2) ?: "50 tracks"
+                                } else if (textList.isNotEmpty()) {
+                                    author = textList[0]
+                                }
+                            }
+
+                            val thumbArr = item.optJSONObject("thumbnail")
+                                ?.optJSONObject("musicThumbnailRenderer")
+                                ?.optJSONObject("thumbnail")
+                                ?.optJSONArray("thumbnails")
+                            val thumb = thumbArr?.optJSONObject(thumbArr.length() - 1)?.optString("url") ?: ""
+
+                            val id = item.optJSONObject("navigationEndpoint")
+                                ?.optJSONObject("browseEndpoint")
+                                ?.optString("browseId")
+                                ?: item.optJSONArray("flexColumns")?.optJSONObject(0)
+                                    ?.optJSONObject("musicResponsiveListItemFlexColumnRenderer")
+                                    ?.optJSONObject("text")?.optJSONArray("runs")?.optJSONObject(0)
+                                    ?.optJSONObject("navigationEndpoint")?.optJSONObject("browseEndpoint")?.optString("browseId")
+                                ?: "playlist_$i"
+
+                            if (title.isNotBlank()) {
+                                playlists.add(
+                                    YtmCommunityPlaylist(
+                                        id = id,
+                                        title = title,
+                                        author = author,
+                                        trackCount = count,
+                                        artworkUrl = thumb
+                                    )
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (playlists.isNotEmpty()) return@withContext playlists
+        } catch (e: Exception) {
+            Log.w(TAG, "Error fetching live community playlists: ${e.message}")
+        }
+
+        listOf(
+            YtmCommunityPlaylist("VLPL4fGSI1pDJn5kI81J1fYWK5eZRl1zJ5kM", "Global Pop Trends 2025", "Billboard Charts", "50 tracks", "https://img.youtube.com/vi/fcnDmrtj6Sk/hqdefault.jpg"),
+            YtmCommunityPlaylist("RDCLAK5uy_kmPRjFGN7YstCHdnuf39O75UPhGmbutFc", "Today's Top 50 Hits", "Global Top 50", "50 tracks", "https://img.youtube.com/vi/vRjaGgDsWSo/hqdefault.jpg"),
+            YtmCommunityPlaylist("RDCLAK5uy_kPX6d-r5p_3M_W7Qv_U1tE-0_k1u3q-8", "Late Night Vibes & Chill", "Aura Acoustics", "65 tracks", "https://img.youtube.com/vi/vSA7yMrTETg/hqdefault.jpg")
+        )
+    }
+
+    /**
+     * Resolves tracks from any user-uploaded or public YouTube Music playlist.
+     */
+    suspend fun fetchPlaylistTracks(browseId: String): List<AuraTrack> = withContext(Dispatchers.IO) {
+        try {
+            val actualBrowseId = if (browseId.startsWith("VL") || browseId.startsWith("FEmusic_")) browseId else "VL$browseId"
+            val payload = JSONObject().apply {
+                put("context", JSONObject().apply {
+                    put("client", JSONObject().apply {
+                        put("clientName", "WEB_REMIX")
+                        put("clientVersion", "1.20250312.01.00")
+                        put("hl", "en")
+                        put("gl", "US")
+                    })
+                })
+                put("browseId", actualBrowseId)
+            }
+
+            val req = Request.Builder()
+                .url("https://music.youtube.com/youtubei/v1/browse?prettyPrint=false")
+                .header("User-Agent", USER_AGENT)
+                .header("Origin", "https://music.youtube.com")
+                .header("Referer", "https://music.youtube.com/")
+                .post(payload.toString().toRequestBody("application/json".toMediaType()))
+                .build()
+
+            val tracks = mutableListOf<AuraTrack>()
+            httpClient.newCall(req).execute().use { resp ->
+                if (resp.isSuccessful) {
+                    val root = JSONObject(resp.body?.string() ?: "{}")
+                    val contents = root.optJSONObject("contents")
+                        ?.optJSONObject("twoColumnBrowseResultsRenderer")
+                        ?.optJSONObject("secondaryContents")
+                        ?.optJSONObject("sectionListRenderer")
+                        ?.optJSONArray("contents")
+
+                    val playlistShelf = contents?.optJSONObject(0)?.optJSONObject("musicPlaylistShelfRenderer")
+                    val items = playlistShelf?.optJSONArray("contents")
+                    if (items != null) {
+                        for (i in 0 until items.length()) {
+                            val item = items.optJSONObject(i)?.optJSONObject("musicResponsiveListItemRenderer") ?: continue
+                            val title = item.optJSONArray("flexColumns")
+                                ?.optJSONObject(0)
+                                ?.optJSONObject("musicResponsiveListItemFlexColumnRenderer")
+                                ?.optJSONObject("text")
+                                ?.optJSONArray("runs")
+                                ?.optJSONObject(0)
+                                ?.optString("text") ?: continue
+
+                            val artist = item.optJSONArray("flexColumns")
+                                ?.optJSONObject(1)
+                                ?.optJSONObject("musicResponsiveListItemFlexColumnRenderer")
+                                ?.optJSONObject("text")
+                                ?.optJSONArray("runs")
+                                ?.optJSONObject(0)
+                                ?.optString("text") ?: "YouTube Music Artist"
+
+                            val vidId = item.optJSONObject("playlistItemData")?.optString("videoId")
+                                ?: item.optJSONObject("navigationEndpoint")
+                                    ?.optJSONObject("watchEndpoint")
+                                    ?.optString("videoId") ?: continue
+
+                            val thumbArr = item.optJSONObject("thumbnail")
+                                ?.optJSONObject("musicThumbnailRenderer")
+                                ?.optJSONObject("thumbnail")
+                                ?.optJSONArray("thumbnails")
+                            val thumb = thumbArr?.optJSONObject(thumbArr.length() - 1)?.optString("url")
+                                ?: "https://img.youtube.com/vi/$vidId/hqdefault.jpg"
+
+                            tracks.add(
+                                AuraTrack(
+                                    id = "yt_$vidId",
+                                    videoId = vidId,
+                                    title = title,
+                                    artist = artist,
+                                    album = "YouTube Music Playlist",
+                                    durationSeconds = 210,
+                                    artworkUrl = thumb
+                                )
+                            )
+                        }
+                    }
+                }
+            }
+            if (tracks.isNotEmpty()) return@withContext tracks
+        } catch (e: Exception) {
+            Log.w(TAG, "Error fetching playlist tracks: ${e.message}")
+        }
+        emptyList()
+    }
+
+    /**
+     * Fetches detailed playlist overview with banner artwork, creator, total tracks, and ranked track list with views/durations.
+     */
+    suspend fun fetchPlaylistDetail(playlist: YtmCommunityPlaylist): PlaylistDetail = withContext(Dispatchers.IO) {
+        try {
+            val actualBrowseId = if (playlist.id.startsWith("VL") || playlist.id.startsWith("FEmusic_")) playlist.id else "VL${playlist.id}"
+            val payload = JSONObject().apply {
+                put("context", JSONObject().apply {
+                    put("client", JSONObject().apply {
+                        put("clientName", "WEB_REMIX")
+                        put("clientVersion", "1.20250312.01.00")
+                        put("hl", "en")
+                        put("gl", "US")
+                    })
+                })
+                put("browseId", actualBrowseId)
+            }
+
+            val req = Request.Builder()
+                .url("https://music.youtube.com/youtubei/v1/browse?prettyPrint=false")
+                .header("User-Agent", USER_AGENT)
+                .header("Origin", "https://music.youtube.com")
+                .header("Referer", "https://music.youtube.com/")
+                .post(payload.toString().toRequestBody("application/json".toMediaType()))
+                .build()
+
+            httpClient.newCall(req).execute().use { resp ->
+                if (resp.isSuccessful) {
+                    val root = JSONObject(resp.body?.string() ?: "{}")
+                    val twoCol = root.optJSONObject("contents")?.optJSONObject("twoColumnBrowseResultsRenderer")
+
+                    var bannerUrl = playlist.artworkUrl
+                    var title = playlist.title
+                    var authorAndMeta = playlist.author
+
+                    val headerRenderer = twoCol?.optJSONArray("tabs")?.optJSONObject(0)
+                        ?.optJSONObject("tabRenderer")?.optJSONObject("content")
+                        ?.optJSONObject("sectionListRenderer")?.optJSONArray("contents")
+                        ?.optJSONObject(0)?.optJSONObject("musicResponsiveHeaderRenderer")
+
+                    if (headerRenderer != null) {
+                        val titleRun = headerRenderer.optJSONObject("title")?.optJSONArray("runs")?.optJSONObject(0)?.optString("text")
+                        if (!titleRun.isNullOrBlank()) title = titleRun
+
+                        val secondSub = headerRenderer.optJSONObject("secondSubtitle")?.optJSONArray("runs")
+                        if (secondSub != null) {
+                            val texts = mutableListOf<String>()
+                            for (s in 0 until secondSub.length()) {
+                                val t = secondSub.optJSONObject(s)?.optString("text")?.trim() ?: ""
+                                if (t.isNotEmpty() && t != "•") texts.add(t)
+                            }
+                            if (texts.isNotEmpty()) {
+                                authorAndMeta = texts.joinToString(" • ")
+                            }
+                        }
+
+                        val thumbArr = headerRenderer.optJSONObject("thumbnail")
+                            ?.optJSONObject("musicThumbnailRenderer")
+                            ?.optJSONObject("thumbnail")
+                            ?.optJSONArray("thumbnails")
+                        if (thumbArr != null && thumbArr.length() > 0) {
+                            bannerUrl = thumbArr.optJSONObject(thumbArr.length() - 1)?.optString("url") ?: bannerUrl
+                        }
+                    }
+
+                    val playlistShelf = twoCol?.optJSONObject("secondaryContents")
+                        ?.optJSONObject("sectionListRenderer")
+                        ?.optJSONArray("contents")
+                        ?.optJSONObject(0)
+                        ?.optJSONObject("musicPlaylistShelfRenderer")
+
+                    val items = playlistShelf?.optJSONArray("contents")
+                    val playlistTracks = mutableListOf<PlaylistTrackItem>()
+
+                    if (items != null) {
+                        for (i in 0 until items.length()) {
+                            val item = items.optJSONObject(i)?.optJSONObject("musicResponsiveListItemRenderer") ?: continue
+                            val flexCols = item.optJSONArray("flexColumns") ?: continue
+                            val itemTitle = flexCols.optJSONObject(0)
+                                ?.optJSONObject("musicResponsiveListItemFlexColumnRenderer")
+                                ?.optJSONObject("text")
+                                ?.optJSONArray("runs")
+                                ?.optJSONObject(0)
+                                ?.optString("text") ?: continue
+
+                            val artistRuns = flexCols.optJSONObject(1)
+                                ?.optJSONObject("musicResponsiveListItemFlexColumnRenderer")
+                                ?.optJSONObject("text")
+                                ?.optJSONArray("runs")
+
+                            val artistBuilder = StringBuilder()
+                            if (artistRuns != null) {
+                                for (a in 0 until artistRuns.length()) {
+                                    artistBuilder.append(artistRuns.optJSONObject(a)?.optString("text") ?: "")
+                                }
+                            }
+                            val artist = artistBuilder.toString().ifBlank { "YouTube Music Artist" }
+
+                            val fixedCols = item.optJSONArray("fixedColumns")
+                            val durationText = fixedCols?.optJSONObject(0)
+                                ?.optJSONObject("musicResponsiveListItemFixedColumnRenderer")
+                                ?.optJSONObject("text")
+                                ?.optJSONArray("runs")
+                                ?.optJSONObject(0)
+                                ?.optString("text") ?: ""
+
+                            val vidId = item.optJSONObject("playlistItemData")?.optString("videoId")
+                                ?: item.optJSONObject("navigationEndpoint")
+                                    ?.optJSONObject("watchEndpoint")
+                                    ?.optString("videoId") ?: continue
+
+                            val thumbArr = item.optJSONObject("thumbnail")
+                                ?.optJSONObject("musicThumbnailRenderer")
+                                ?.optJSONObject("thumbnail")
+                                ?.optJSONArray("thumbnails")
+                            val thumb = thumbArr?.optJSONObject(thumbArr.length() - 1)?.optString("url")
+                                ?: "https://img.youtube.com/vi/$vidId/hqdefault.jpg"
+
+                            playlistTracks.add(
+                                PlaylistTrackItem(
+                                    rank = i + 1,
+                                    track = AuraTrack(
+                                        id = "yt_$vidId",
+                                        videoId = vidId,
+                                        title = itemTitle,
+                                        artist = artist.replace(" - Topic", "").trim(),
+                                        album = title,
+                                        durationSeconds = parseDurationText(durationText),
+                                        artworkUrl = thumb
+                                    ),
+                                    viewCount = durationText.ifBlank { "Popular track" }
+                                )
+                            )
+                        }
+                    }
+
+                    if (playlistTracks.isNotEmpty()) {
+                        return@withContext PlaylistDetail(
+                            id = playlist.id,
+                            title = title,
+                            author = authorAndMeta,
+                            trackCount = "${playlistTracks.size} tracks",
+                            bannerUrl = bannerUrl,
+                            tracks = playlistTracks
+                        )
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Error fetching playlist detail browse: ${e.message}")
+        }
+
+        val fallbackTracks = fetchPlaylistTracks(playlist.id)
+        PlaylistDetail(
+            id = playlist.id,
+            title = playlist.title,
+            author = playlist.author,
+            trackCount = "${fallbackTracks.size} tracks",
+            bannerUrl = playlist.artworkUrl,
+            tracks = fallbackTracks.mapIndexed { idx, trk ->
+                PlaylistTrackItem(rank = idx + 1, track = trk, viewCount = "3:30")
+            }
+        )
+    }
+
+    /**
+     * Fetches detailed artist profile with high-res banner and ranked 1-10 Top Songs with stream counts.
+     */
+    suspend fun fetchArtistDetail(artist: YtmTopArtist): ArtistDetail = withContext(Dispatchers.IO) {
+        try {
+            val payload = JSONObject().apply {
+                put("context", JSONObject().apply {
+                    put("client", JSONObject().apply {
+                        put("clientName", "WEB_REMIX")
+                        put("clientVersion", "1.20250312.01.00")
+                        put("hl", "en")
+                        put("gl", "US")
+                    })
+                })
+                put("browseId", artist.id)
+            }
+
+            val req = Request.Builder()
+                .url("https://music.youtube.com/youtubei/v1/browse?prettyPrint=false")
+                .header("User-Agent", USER_AGENT)
+                .header("Origin", "https://music.youtube.com")
+                .header("Referer", "https://music.youtube.com/")
+                .post(payload.toString().toRequestBody("application/json".toMediaType()))
+                .build()
+
+            httpClient.newCall(req).execute().use { resp ->
+                if (resp.isSuccessful) {
+                    val root = JSONObject(resp.body?.string() ?: "{}")
+                    val header = root.optJSONObject("header")?.optJSONObject("musicImmersiveHeaderRenderer")
+                    val bannerThumbnails = header?.optJSONObject("thumbnail")
+                        ?.optJSONObject("musicThumbnailRenderer")
+                        ?.optJSONObject("thumbnail")
+                        ?.optJSONArray("thumbnails")
+                    val bannerUrl = bannerThumbnails?.optJSONObject(bannerThumbnails.length() - 1)?.optString("url")
+                        ?: artist.avatarUrl
+
+                    val subsCount = header?.optJSONObject("subscriptionButton")
+                        ?.optJSONObject("subscribeButtonRenderer")
+                        ?.optJSONObject("subscriberCountText")
+                        ?.optJSONArray("runs")
+                        ?.optJSONObject(0)
+                        ?.optString("text")
+                        ?: artist.subscribers
+
+                    val contents = root.optJSONObject("contents")
+                        ?.optJSONObject("singleColumnBrowseResultsRenderer")
+                        ?.optJSONArray("tabs")
+                        ?.optJSONObject(0)
+                        ?.optJSONObject("tabRenderer")
+                        ?.optJSONObject("content")
+                        ?.optJSONObject("sectionListRenderer")
+                        ?.optJSONArray("contents")
+
+                    val topSongs = mutableListOf<ArtistSong>()
+                    if (contents != null) {
+                        for (i in 0 until contents.length()) {
+                            val shelf = contents.optJSONObject(i)?.optJSONObject("musicShelfRenderer") ?: continue
+                            val shelfTitle = shelf.optJSONObject("title")
+                                ?.optJSONArray("runs")
+                                ?.optJSONObject(0)
+                                ?.optString("text") ?: ""
+
+                            if (shelfTitle.contains("Top songs", ignoreCase = true) || shelfTitle.contains("Songs", ignoreCase = true)) {
+                                val songItems = shelf.optJSONArray("contents") ?: continue
+                                for (j in 0 until minOf(songItems.length(), 10)) {
+                                    val item = songItems.optJSONObject(j)?.optJSONObject("musicResponsiveListItemRenderer") ?: continue
+                                    val title = item.optJSONArray("flexColumns")
+                                        ?.optJSONObject(0)
+                                        ?.optJSONObject("musicResponsiveListItemFlexColumnRenderer")
+                                        ?.optJSONObject("text")
+                                        ?.optJSONArray("runs")
+                                        ?.optJSONObject(0)
+                                        ?.optString("text") ?: continue
+
+                                    val flexCols = item.optJSONArray("flexColumns")
+                                    val album = flexCols?.optJSONObject(1)
+                                        ?.optJSONObject("musicResponsiveListItemFlexColumnRenderer")
+                                        ?.optJSONObject("text")
+                                        ?.optJSONArray("runs")
+                                        ?.optJSONObject(0)
+                                        ?.optString("text") ?: artist.name
+
+                                    var playCount = ""
+                                    if (flexCols != null && flexCols.length() > 2) {
+                                        playCount = flexCols.optJSONObject(2)
+                                            ?.optJSONObject("musicResponsiveListItemFlexColumnRenderer")
+                                            ?.optJSONObject("text")
+                                            ?.optJSONArray("runs")
+                                            ?.optJSONObject(0)
+                                            ?.optString("text") ?: ""
+                                    }
+
+                                    val vidId = item.optJSONObject("playlistItemData")?.optString("videoId")
+                                        ?: item.optJSONObject("navigationEndpoint")
+                                            ?.optJSONObject("watchEndpoint")
+                                            ?.optString("videoId") ?: continue
+
+                                    val thumbArr = item.optJSONObject("thumbnail")
+                                        ?.optJSONObject("musicThumbnailRenderer")
+                                        ?.optJSONObject("thumbnail")
+                                        ?.optJSONArray("thumbnails")
+                                    val thumb = thumbArr?.optJSONObject(thumbArr.length() - 1)?.optString("url")
+                                        ?: "https://img.youtube.com/vi/$vidId/hqdefault.jpg"
+
+                                    topSongs.add(
+                                        ArtistSong(
+                                            rank = j + 1,
+                                            track = AuraTrack(
+                                                id = "yt_$vidId",
+                                                videoId = vidId,
+                                                title = title,
+                                                artist = artist.name,
+                                                album = album,
+                                                durationSeconds = 210,
+                                                artworkUrl = thumb
+                                            ),
+                                            playCount = playCount
+                                        )
+                                    )
+                                }
+                                break
+                            }
+                        }
+                    }
+
+                    if (topSongs.isNotEmpty()) {
+                        return@withContext ArtistDetail(
+                            id = artist.id,
+                            name = artist.name,
+                            subscribers = subsCount,
+                            bannerUrl = bannerUrl,
+                            topSongs = topSongs
+                        )
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Error fetching artist channel browse: ${e.message}")
+        }
+
+        // Search fallback
+        val searched = searchYouTubeMusic("${artist.name} official songs", "songs").take(10)
+        val fallbackSongs = searched.mapIndexed { idx, track ->
+            ArtistSong(
+                rank = idx + 1,
+                track = track,
+                playCount = "Popular stream"
+            )
+        }
+        ArtistDetail(
+            id = artist.id,
+            name = artist.name,
+            subscribers = artist.subscribers,
+            bannerUrl = artist.avatarUrl,
+            topSongs = fallbackSongs
+        )
+    }
+
+    /**
      * Direct Client-First Spotify Public Playlist Importer:
      * Fetches `https://open.spotify.com/embed/playlist/{playlistId}`, extracts `__NEXT_DATA__` tracklist,
      * and resolves matching YouTube Music tracks in parallel without any backend server.
@@ -546,7 +1225,7 @@ object SimpMusicExtractorEngine {
         playlistUrl: String,
         onProgress: (resolved: Int, total: Int) -> Unit = { _, _ -> }
     ): AuraPlaylist? = withContext(Dispatchers.IO) {
-        val playlistId = Regex("playlist/([a-zA-Z0-9]+)").find(playlistUrl)?.groupValues?.getOrNull(1)
+        val playlistId = Regex("playlist[/:]?([a-zA-Z0-9]+)").find(playlistUrl)?.groupValues?.getOrNull(1)
             ?: return@withContext null
 
         val embedUrl = "https://open.spotify.com/embed/playlist/$playlistId"
@@ -571,13 +1250,61 @@ object SimpMusicExtractorEngine {
             ?.optJSONObject("entity") ?: return@withContext null
 
         val playlistName = entity.optString("name", "Spotify Imported Playlist")
-        val coverUrl = entity.optJSONObject("coverArt")
-            ?.optJSONArray("sources")
-            ?.optJSONObject(0)
-            ?.optString("url") ?: ""
 
+        // Multi-tier cover art resolution:
+        // 1. visualIdentity.image array (highest resolution)
+        var coverUrl = ""
+        val visualImages = entity.optJSONObject("visualIdentity")?.optJSONArray("image")
+        if (visualImages != null && visualImages.length() > 0) {
+            for (idx in visualImages.length() - 1 downTo 0) {
+                val candidate = visualImages.optJSONObject(idx)?.optString("url") ?: ""
+                if (candidate.isNotBlank()) {
+                    coverUrl = candidate
+                    break
+                }
+            }
+        }
+
+        // 2. attributes array (image_url or header_image_url_desktop)
+        if (coverUrl.isBlank()) {
+            val attributes = entity.optJSONArray("attributes")
+            if (attributes != null) {
+                for (a in 0 until attributes.length()) {
+                    val attr = attributes.optJSONObject(a) ?: continue
+                    val key = attr.optString("key")
+                    val value = attr.optString("value")
+                    if ((key == "image_url" || key == "header_image_url_desktop") && value.isNotBlank()) {
+                        coverUrl = value
+                        break
+                    }
+                }
+            }
+        }
+
+        // 3. coverArt sources
+        if (coverUrl.isBlank()) {
+            val coverSources = entity.optJSONObject("coverArt")?.optJSONArray("sources")
+            if (coverSources != null && coverSources.length() > 0) {
+                coverUrl = coverSources.optJSONObject(0)?.optString("url") ?: ""
+            }
+        }
+
+        // 4. HTML meta tags & preload link fallback
+        if (coverUrl.isBlank()) {
+            val preloadMatch = Regex("<link rel=\"preload\" as=\"image\" href=\"([^\"]+)\"").find(html)
+            if (preloadMatch != null) {
+                coverUrl = preloadMatch.groupValues[1]
+            } else {
+                val ogImageMatch = Regex("<meta property=\"og:image\" content=\"([^\"]+)\"").find(html)
+                if (ogImageMatch != null) {
+                    coverUrl = ogImageMatch.groupValues[1]
+                }
+            }
+        }
+
+        // Parse ALL tracks from trackList without arbitrary truncation
         val trackListArray = entity.optJSONArray("trackList") ?: JSONArray()
-        val totalToImport = trackListArray.length().coerceAtMost(25)
+        val totalToImport = trackListArray.length()
         val rawSeeds = mutableListOf<Pair<String, String>>()
 
         for (i in 0 until totalToImport) {
@@ -606,7 +1333,7 @@ object SimpMusicExtractorEngine {
         AuraPlaylist(
             id = "spotify_$playlistId",
             name = playlistName,
-            description = "Imported directly from Spotify (${resolvedTracks.size} tracks matched on YouTube Music)",
+            description = "Imported from Spotify • ${resolvedTracks.size} tracks",
             coverUrl = coverUrl.ifBlank { resolvedTracks.firstOrNull()?.highResArtworkUrl ?: "" },
             tracks = resolvedTracks
         )
@@ -719,54 +1446,92 @@ object SimpMusicExtractorEngine {
 
     val DEFAULT_SEED_TRACKS = listOf(
         AuraTrack(
-            id = "yt_4NRXx6U8ABQ",
+            id = "curated-paradise",
+            videoId = "4tijiFGhBN8",
+            title = "PARADISE",
+            artist = "Chase Atlantic",
+            album = "BEAUTY IN DEATH (Deluxe Edition)",
+            durationSeconds = 256,
+            artworkUrl = "https://img.youtube.com/vi/4tijiFGhBN8/hqdefault.jpg",
+            genre = "Alt R&B",
+            hasLyricsBadge = true
+        ),
+        AuraTrack(
+            id = "curated-blinding-lights",
             videoId = "4NRXx6U8ABQ",
             title = "Blinding Lights",
             artist = "The Weeknd",
             album = "After Hours",
             durationSeconds = 200,
             artworkUrl = "https://img.youtube.com/vi/4NRXx6U8ABQ/hqdefault.jpg",
-            genre = "Synthwave / Pop"
+            genre = "Synthwave",
+            hasLyricsBadge = true
         ),
         AuraTrack(
-            id = "yt_fHI8X4OXluQ",
-            videoId = "fHI8X4OXluQ",
-            title = "Save Your Tears",
-            artist = "The Weeknd",
-            album = "After Hours",
-            durationSeconds = 215,
-            artworkUrl = "https://img.youtube.com/vi/fHI8X4OXluQ/hqdefault.jpg",
-            genre = "Synthpop"
+            id = "curated-birds-of-a-feather",
+            videoId = "d5gf9dXbPi0",
+            title = "BIRDS OF A FEATHER",
+            artist = "Billie Eilish",
+            album = "HIT ME HARD AND SOFT",
+            durationSeconds = 196,
+            artworkUrl = "https://img.youtube.com/vi/d5gf9dXbPi0/hqdefault.jpg",
+            genre = "Alt Pop",
+            isExplicit = true
         ),
         AuraTrack(
-            id = "yt_34Na4j8AVgA",
+            id = "curated-fein",
+            videoId = "B9synWjqBn8",
+            title = "FE!N",
+            artist = "Travis Scott",
+            album = "UTOPIA",
+            durationSeconds = 191,
+            artworkUrl = "https://img.youtube.com/vi/B9synWjqBn8/hqdefault.jpg",
+            genre = "Hip Hop",
+            isExplicit = true
+        ),
+        AuraTrack(
+            id = "curated-505",
+            videoId = "qU9mHegkTc4",
+            title = "505",
+            artist = "Arctic Monkeys",
+            album = "Favourite Worst Nightmare",
+            durationSeconds = 253,
+            artworkUrl = "https://img.youtube.com/vi/qU9mHegkTc4/hqdefault.jpg",
+            genre = "Indie Rock",
+            hasLyricsBadge = true
+        ),
+        AuraTrack(
+            id = "curated-starboy",
             videoId = "34Na4j8AVgA",
             title = "Starboy",
             artist = "The Weeknd ft. Daft Punk",
             album = "Starboy",
             durationSeconds = 230,
             artworkUrl = "https://img.youtube.com/vi/34Na4j8AVgA/hqdefault.jpg",
-            genre = "R&B / Electronic"
+            genre = "R&B / Pop",
+            isExplicit = true
         ),
         AuraTrack(
-            id = "yt_qFLhGq0060w",
-            videoId = "qFLhGq0060w",
-            title = "I Feel It Coming",
-            artist = "The Weeknd ft. Daft Punk",
-            album = "Starboy",
-            durationSeconds = 269,
-            artworkUrl = "https://img.youtube.com/vi/qFLhGq0060w/hqdefault.jpg",
-            genre = "Disco / Funk"
-        ),
-        AuraTrack(
-            id = "yt_JQbjS0_ZfJ0",
-            videoId = "JQbjS0_ZfJ0",
-            title = "Kill Bill",
+            id = "curated-snooze",
+            videoId = "Sv5yCzPCkv8",
+            title = "Snooze",
             artist = "SZA",
             album = "SOS",
-            durationSeconds = 153,
-            artworkUrl = "https://img.youtube.com/vi/JQbjS0_ZfJ0/hqdefault.jpg",
-            genre = "R&B"
+            durationSeconds = 201,
+            artworkUrl = "https://img.youtube.com/vi/Sv5yCzPCkv8/hqdefault.jpg",
+            genre = "R&B",
+            hasLyricsBadge = true
+        ),
+        AuraTrack(
+            id = "curated-chemical",
+            videoId = "4D4bB6n0qI4",
+            title = "Chemical",
+            artist = "Post Malone",
+            album = "AUSTIN",
+            durationSeconds = 184,
+            artworkUrl = "https://img.youtube.com/vi/4D4bB6n0qI4/hqdefault.jpg",
+            genre = "Pop",
+            hasLyricsBadge = true
         )
     )
 }

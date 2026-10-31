@@ -1,6 +1,17 @@
 package com.auramusic.app.ui.screens
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -16,38 +27,39 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Clear
-import androidx.compose.material.icons.rounded.LibraryMusic
 import androidx.compose.material.icons.rounded.Search
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.auramusic.app.domain.model.AuraTrack
-import com.auramusic.app.ui.theme.AuraCyan
-import com.auramusic.app.ui.theme.AuraViolet
-import com.auramusic.app.ui.theme.ObsidianBackground
-import com.auramusic.app.ui.theme.ObsidianCard
+import com.auramusic.app.ui.theme.AuraNeonLime
+import com.auramusic.app.ui.theme.AuraPillInactive
+import com.auramusic.app.ui.theme.AuraPillInactiveText
+import com.auramusic.app.ui.theme.AuraPlayGreen
+import com.auramusic.app.ui.theme.SpotifyCard
+import com.auramusic.app.ui.theme.SpotifyPitchBlack
 import com.auramusic.app.ui.theme.TextPrimary
 import com.auramusic.app.ui.theme.TextSecondary
 
@@ -57,7 +69,6 @@ fun SearchScreen(
     filter: String,
     results: List<AuraTrack>,
     isSearching: Boolean,
-    spotifyImportStatus: String?,
     favorites: List<AuraTrack>,
     downloads: List<AuraTrack>,
     downloadingIds: Set<String>,
@@ -65,176 +76,154 @@ fun SearchScreen(
     onFilterChange: (String) -> Unit,
     onPlayTrack: (AuraTrack, List<AuraTrack>) -> Unit,
     onToggleFavorite: (AuraTrack) -> Unit,
-    onDownloadTrack: (AuraTrack) -> Unit,
-    onImportSpotifyPlaylist: (String) -> Unit
+    onDownloadTrack: (AuraTrack) -> Unit
 ) {
-    var spotifyUrlInput by remember { mutableStateOf("") }
-    var showSpotifyImporter by remember { mutableStateOf(false) }
+    val listState = rememberLazyListState()
+    val searchEasing = remember { CubicBezierEasing(0.23f, 1f, 0.32f, 1f) }
+
+    val isScrolled by remember {
+        derivedStateOf {
+            listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 20
+        }
+    }
+
+    LaunchedEffect(query, filter) {
+        if (listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 0) {
+            listState.scrollToItem(0)
+        }
+    }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(ObsidianBackground)
-            .padding(top = 18.dp)
+            .background(SpotifyPitchBlack)
+            .padding(top = 2.dp)
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 20.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = "Discover & Search",
-                style = MaterialTheme.typography.headlineLarge
-            )
-
-            Surface(
-                shape = RoundedCornerShape(12.dp),
-                color = Color(0xFF1DB954).copy(alpha = 0.16f),
-                modifier = Modifier
-                    .clip(RoundedCornerShape(12.dp))
-                    .clickable { showSpotifyImporter = !showSpotifyImporter }
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.LibraryMusic,
-                        contentDescription = "Spotify Playlist Importer",
-                        tint = Color(0xFF1DB954),
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = "Spotify Import",
-                        color = Color(0xFF1DB954),
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 12.sp
-                    )
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(14.dp))
-
-        // Direct Client-First Spotify Playlist Importer Box
-        if (showSpotifyImporter) {
-            Surface(
-                shape = RoundedCornerShape(16.dp),
-                color = ObsidianCard,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 20.dp, vertical = 6.dp)
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text(
-                        text = "Direct Spotify Public Playlist Importer",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = Color(0xFF1DB954)
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = "Scrapes Spotify Embed directly on-device & matches tracks on YouTube Music.",
-                        style = MaterialTheme.typography.bodyMedium
-                    )
-                    Spacer(modifier = Modifier.height(10.dp))
-                    OutlinedTextField(
-                        value = spotifyUrlInput,
-                        onValueChange = { spotifyUrlInput = it },
-                        placeholder = { Text("https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = Color(0xFF1DB954),
-                            unfocusedBorderColor = TextSecondary.copy(alpha = 0.3f),
-                            focusedTextColor = TextPrimary,
-                            unfocusedTextColor = TextPrimary
-                        )
-                    )
-                    Spacer(modifier = Modifier.height(10.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = spotifyImportStatus ?: "Zero cloud backend required",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = AuraCyan
-                        )
-                        Button(
-                            onClick = { onImportSpotifyPlaylist(spotifyUrlInput) },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1DB954))
-                        ) {
-                            Text("Import Playlist", color = Color.Black, fontWeight = FontWeight.Bold)
-                        }
-                    }
-                }
-            }
-        }
-
-        // YouTube Music Search Input
-        OutlinedTextField(
-            value = query,
-            onValueChange = onQueryChange,
-            placeholder = { Text("Search songs, artists, albums on YouTube Music…") },
-            singleLine = true,
-            leadingIcon = {
-                Icon(
-                    imageVector = Icons.Rounded.Search,
-                    contentDescription = "Search",
-                    tint = TextSecondary
-                )
-            },
-            trailingIcon = {
-                if (query.isNotEmpty()) {
-                    IconButton(onClick = { onQueryChange("") }) {
-                        Icon(
-                            imageVector = Icons.Rounded.Clear,
-                            contentDescription = "Clear Search",
-                            tint = TextSecondary
-                        )
-                    }
-                }
-            },
-            shape = RoundedCornerShape(16.dp),
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedContainerColor = ObsidianCard,
-                unfocusedContainerColor = ObsidianCard,
-                focusedBorderColor = AuraViolet,
-                unfocusedBorderColor = Color.Transparent,
-                focusedTextColor = TextPrimary,
-                unfocusedTextColor = TextPrimary
+        // Collapsible "Search" Headline: Pushes up and hides when scrolling songs
+        AnimatedVisibility(
+            visible = !isScrolled,
+            enter = expandVertically(
+                animationSpec = tween(durationMillis = 220, easing = searchEasing)
+            ) + fadeIn(
+                animationSpec = tween(durationMillis = 180)
+            ) + slideInVertically(
+                animationSpec = tween(durationMillis = 220, easing = searchEasing),
+                initialOffsetY = { -it }
             ),
+            exit = shrinkVertically(
+                animationSpec = tween(durationMillis = 200, easing = searchEasing)
+            ) + fadeOut(
+                animationSpec = tween(durationMillis = 150)
+            ) + slideOutVertically(
+                animationSpec = tween(durationMillis = 200, easing = searchEasing),
+                targetOffsetY = { -it }
+            )
+        ) {
+            Column {
+                Text(
+                    text = "Search",
+                    style = MaterialTheme.typography.headlineLarge,
+                    color = TextPrimary,
+                    modifier = Modifier.padding(horizontal = 20.dp)
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+            }
+        }
+
+        // Search Input Bar (Slim, compact 40dp height with pill shape)
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 20.dp)
-        )
+                .height(40.dp)
+                .clip(RoundedCornerShape(20.dp))
+                .background(Color(0xFF1E2026))
+                .border(
+                    width = 1.dp,
+                    color = if (query.isNotEmpty()) AuraNeonLime else Color(0xFF2C2F3A),
+                    shape = RoundedCornerShape(20.dp)
+                )
+                .padding(horizontal = 14.dp),
+            contentAlignment = Alignment.CenterStart
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.Search,
+                    contentDescription = "Search",
+                    tint = TextSecondary,
+                    modifier = Modifier.size(18.dp)
+                )
+
+                Spacer(modifier = Modifier.width(10.dp))
+
+                Box(
+                    modifier = Modifier.weight(1f),
+                    contentAlignment = Alignment.CenterStart
+                ) {
+                    if (query.isEmpty()) {
+                        Text(
+                            text = "What do you want to listen to?",
+                            color = TextSecondary,
+                            fontSize = 13.sp,
+                            maxLines = 1
+                        )
+                    }
+
+                    BasicTextField(
+                        value = query,
+                        onValueChange = onQueryChange,
+                        singleLine = true,
+                        textStyle = MaterialTheme.typography.bodyMedium.copy(
+                            color = TextPrimary,
+                            fontSize = 13.sp
+                        ),
+                        cursorBrush = SolidColor(AuraPlayGreen),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+
+                if (query.isNotEmpty()) {
+                    IconButton(
+                        onClick = { onQueryChange("") },
+                        modifier = Modifier.size(26.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Clear,
+                            contentDescription = "Clear Search",
+                            tint = TextSecondary,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
+            }
+        }
 
         Spacer(modifier = Modifier.height(12.dp))
 
-        // Filter Chips (Songs vs Videos)
+        // Filter Pills matching Home & Library
         Row(
             modifier = Modifier.padding(horizontal = 20.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            listOf("songs" to "Official Songs", "videos" to "Music Videos & Live").forEach { (key, label) ->
+            listOf("songs" to "Songs", "videos" to "Videos").forEach { (key, label) ->
                 val selected = filter == key
                 Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = if (selected) AuraViolet else ObsidianCard,
+                    shape = CircleShape,
+                    color = if (selected) AuraNeonLime else AuraPillInactive,
                     modifier = Modifier
-                        .clip(RoundedCornerShape(12.dp))
+                        .clip(CircleShape)
                         .clickable { onFilterChange(key) }
                 ) {
                     Text(
                         text = label,
-                        color = if (selected) Color.White else TextSecondary,
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 13.sp,
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)
+                        color = if (selected) Color.Black else AuraPillInactiveText,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 12.sp,
+                        modifier = Modifier.padding(horizontal = 18.dp, vertical = 7.dp)
                     )
                 }
             }
@@ -249,17 +238,19 @@ fun SearchScreen(
                     .padding(vertical = 24.dp),
                 contentAlignment = Alignment.Center
             ) {
-                CircularProgressIndicator(color = AuraViolet, modifier = Modifier.size(28.dp))
+                CircularProgressIndicator(color = AuraPlayGreen, modifier = Modifier.size(28.dp))
             }
         }
 
         LazyColumn(
+            state = listState,
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(bottom = 140.dp)
         ) {
             items(results, key = { it.videoId }) { track ->
-                TrackRowItem(
+                SpotifyTrackRowItem(
                     track = track,
+                    isCurrent = false,
                     isFavorite = favorites.any { it.videoId == track.videoId },
                     isDownloaded = downloads.any { it.videoId == track.videoId },
                     isDownloading = downloadingIds.contains(track.videoId),

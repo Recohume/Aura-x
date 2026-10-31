@@ -8,6 +8,8 @@ import com.auramusic.app.core.lyrics.SimpMusicLyricsRepository
 import com.auramusic.app.core.media.AuraPlayerManager
 import com.auramusic.app.core.sponsorblock.SponsorBlockRepository
 import com.auramusic.app.data.AuraStorageRepository
+import com.auramusic.app.domain.model.ArtistDetail
+import com.auramusic.app.domain.model.ArtistSong
 import com.auramusic.app.domain.model.AuraPalette
 import com.auramusic.app.domain.model.AuraPlaylist
 import com.auramusic.app.domain.model.AuraTrack
@@ -16,8 +18,12 @@ import com.auramusic.app.domain.model.ListeningStats
 import com.auramusic.app.domain.model.LyricsData
 import com.auramusic.app.domain.model.MoodCategory
 import com.auramusic.app.domain.model.NowPlayingStyle
+import com.auramusic.app.domain.model.PlaylistDetail
+import com.auramusic.app.domain.model.PlaylistTrackItem
 import com.auramusic.app.domain.model.ReturnYouTubeDislikeData
 import com.auramusic.app.domain.model.YtmChartSection
+import com.auramusic.app.domain.model.YtmCommunityPlaylist
+import com.auramusic.app.domain.model.YtmTopArtist
 import com.auramusic.app.ui.theme.extractAuraPaletteFromUrl
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
@@ -33,6 +39,33 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
     // Home Charts & Moods
     private val _chartSections = MutableStateFlow<List<YtmChartSection>>(emptyList())
     val chartSections: StateFlow<List<YtmChartSection>> = _chartSections.asStateFlow()
+
+    private val _topArtists = MutableStateFlow<List<YtmTopArtist>>(emptyList())
+    val topArtists: StateFlow<List<YtmTopArtist>> = _topArtists.asStateFlow()
+
+    private val _selectedArtistDetail = MutableStateFlow<ArtistDetail?>(null)
+    val selectedArtistDetail: StateFlow<ArtistDetail?> = _selectedArtistDetail.asStateFlow()
+
+    private val _isArtistLoading = MutableStateFlow(false)
+    val isArtistLoading: StateFlow<Boolean> = _isArtistLoading.asStateFlow()
+
+    private val _activeCategory = MutableStateFlow("All")
+    val activeCategory: StateFlow<String> = _activeCategory.asStateFlow()
+
+    private val _categoryTracks = MutableStateFlow<List<AuraTrack>>(emptyList())
+    val categoryTracks: StateFlow<List<AuraTrack>> = _categoryTracks.asStateFlow()
+
+    private val _isCategoryLoading = MutableStateFlow(false)
+    val isCategoryLoading: StateFlow<Boolean> = _isCategoryLoading.asStateFlow()
+
+    private val _communityPlaylists = MutableStateFlow<List<YtmCommunityPlaylist>>(emptyList())
+    val communityPlaylists: StateFlow<List<YtmCommunityPlaylist>> = _communityPlaylists.asStateFlow()
+
+    private val _selectedPlaylistDetail = MutableStateFlow<PlaylistDetail?>(null)
+    val selectedPlaylistDetail: StateFlow<PlaylistDetail?> = _selectedPlaylistDetail.asStateFlow()
+
+    private val _isPlaylistLoading = MutableStateFlow(false)
+    val isPlaylistLoading: StateFlow<Boolean> = _isPlaylistLoading.asStateFlow()
 
     private val _moodCategories = MutableStateFlow<List<MoodCategory>>(emptyList())
     val moodCategories: StateFlow<List<MoodCategory>> = _moodCategories.asStateFlow()
@@ -66,6 +99,9 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
     private val _playlists = MutableStateFlow<List<AuraPlaylist>>(emptyList())
     val playlists: StateFlow<List<AuraPlaylist>> = _playlists.asStateFlow()
 
+    private val _recentlyPlayed = MutableStateFlow<List<AuraTrack>>(emptyList())
+    val recentlyPlayed: StateFlow<List<AuraTrack>> = _recentlyPlayed.asStateFlow()
+
     private val _listeningStats = MutableStateFlow(ListeningStats())
     val listeningStats: StateFlow<ListeningStats> = _listeningStats.asStateFlow()
 
@@ -88,7 +124,7 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
     private val _rydData = MutableStateFlow<ReturnYouTubeDislikeData?>(null)
     val rydData: StateFlow<ReturnYouTubeDislikeData?> = _rydData.asStateFlow()
 
-    private val _nowPlayingStyle = MutableStateFlow(NowPlayingStyle.EXPRESSIVE)
+    private val _nowPlayingStyle = MutableStateFlow(NowPlayingStyle.SPOTIFY)
     val nowPlayingStyle: StateFlow<NowPlayingStyle> = _nowPlayingStyle.asStateFlow()
 
     private var searchJob: Job? = null
@@ -98,17 +134,22 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
         _favorites.value = storage.loadFavorites()
         _downloads.value = storage.loadDownloads()
         _playlists.value = storage.loadPlaylists()
+        _recentlyPlayed.value = storage.loadRecentlyPlayed()
         _listeningStats.value = storage.loadListeningStats()
-        _nowPlayingStyle.value = storage.loadNowPlayingStyle()
+        _nowPlayingStyle.value = NowPlayingStyle.SPOTIFY
+        storage.saveNowPlayingStyle(NowPlayingStyle.SPOTIFY)
 
         AuraPlayerManager.onTrackFinishedCallback = { finishedTrack ->
             _listeningStats.value = storage.recordTrackPlay(finishedTrack)
+            _recentlyPlayed.value = storage.loadRecentlyPlayed()
         }
 
         // Observe current track changes to fetch Palette, SimpMusic RichSync Lyrics, SponsorBlock, and RYD in parallel
         viewModelScope.launch {
             AuraPlayerManager.currentTrack.collectLatest { track ->
                 if (track == null) return@collectLatest
+                storage.recordRecentlyPlayed(track)
+                _recentlyPlayed.value = storage.loadRecentlyPlayed()
                 _lyricsOffsetMs.value = storage.getLyricsOffsetMs(track.videoId)
 
                 val paletteDef = async { extractAuraPaletteFromUrl(track.highResArtworkUrl) }
@@ -138,13 +179,106 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
     fun refreshHome() {
         viewModelScope.launch {
             _isLoadingHome.value = true
-            val (sections, moods) = SimpMusicExtractorEngine.fetchHomeChartsAndMoods()
+            val chartsDeferred = async { SimpMusicExtractorEngine.fetchHomeChartsAndMoods() }
+            val artistsDeferred = async { SimpMusicExtractorEngine.fetchTopArtists() }
+            val playlistsDeferred = async { SimpMusicExtractorEngine.fetchCommunityPlaylists() }
+
+            val (sections, moods) = chartsDeferred.await()
             _chartSections.value = sections
             _moodCategories.value = moods
+            _topArtists.value = artistsDeferred.await()
+            _communityPlaylists.value = playlistsDeferred.await()
             _isLoadingHome.value = false
-            sections.firstOrNull()?.tracks?.firstOrNull()?.let {
+
+            val topTracks = sections.firstOrNull()?.tracks ?: emptyList()
+            if (_searchQuery.value.isBlank() && topTracks.isNotEmpty()) {
+                _searchResults.value = topTracks
+            }
+
+            topTracks.firstOrNull()?.let {
                 SimpMusicExtractorEngine.prefetchStream(it.videoId)
             }
+        }
+    }
+
+    fun playCommunityPlaylist(playlist: YtmCommunityPlaylist) {
+        viewModelScope.launch {
+            val tracks = SimpMusicExtractorEngine.fetchPlaylistTracks(playlist.id)
+            if (tracks.isNotEmpty()) {
+                playTrack(tracks.first(), tracks)
+            }
+        }
+    }
+
+    fun openArtistDetail(artist: YtmTopArtist) {
+        viewModelScope.launch {
+            _isArtistLoading.value = true
+            // Immediately set a preliminary state so transition is instant
+            _selectedArtistDetail.value = ArtistDetail(
+                id = artist.id,
+                name = artist.name,
+                subscribers = artist.subscribers,
+                bannerUrl = artist.avatarUrl,
+                topSongs = emptyList()
+            )
+            val fullDetail = SimpMusicExtractorEngine.fetchArtistDetail(artist)
+            _selectedArtistDetail.value = fullDetail
+            _isArtistLoading.value = false
+        }
+    }
+
+    fun closeArtistDetail() {
+        _selectedArtistDetail.value = null
+    }
+
+    fun openPlaylistDetail(playlist: YtmCommunityPlaylist) {
+        viewModelScope.launch {
+            _isPlaylistLoading.value = true
+            _selectedPlaylistDetail.value = PlaylistDetail(
+                id = playlist.id,
+                title = playlist.title,
+                author = playlist.author,
+                trackCount = playlist.trackCount,
+                bannerUrl = playlist.artworkUrl,
+                tracks = emptyList()
+            )
+            val fullDetail = SimpMusicExtractorEngine.fetchPlaylistDetail(playlist)
+            _selectedPlaylistDetail.value = fullDetail
+            _isPlaylistLoading.value = false
+        }
+    }
+
+    fun closePlaylistDetail() {
+        _selectedPlaylistDetail.value = null
+    }
+
+    fun playArtist(artist: YtmTopArtist) {
+        viewModelScope.launch {
+            val tracks = SimpMusicExtractorEngine.searchYouTubeMusic("${artist.name} official songs", "songs")
+            if (tracks.isNotEmpty()) {
+                playTrack(tracks.first(), tracks)
+            }
+        }
+    }
+
+    fun selectCategory(category: String) {
+        _activeCategory.value = category
+        if (category == "All") {
+            _categoryTracks.value = emptyList()
+            return
+        }
+        viewModelScope.launch {
+            _isCategoryLoading.value = true
+            val query = when (category) {
+                "New Release" -> "new music releases official audio 2025"
+                "Trending" -> "trending viral hits official audio 2025"
+                "Top Chart" -> "billboard top 50 global hits official audio"
+                "Podcasts" -> "popular podcasts episodes full video"
+                else -> "$category songs official audio"
+            }
+            val results = SimpMusicExtractorEngine.searchYouTubeMusic(query, "songs")
+            _categoryTracks.value = results
+            _isCategoryLoading.value = false
         }
     }
 
@@ -152,7 +286,8 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
         _searchQuery.value = query
         searchJob?.cancel()
         if (query.isBlank()) {
-            _searchResults.value = SimpMusicExtractorEngine.DEFAULT_SEED_TRACKS
+            _searchResults.value = _chartSections.value.firstOrNull()?.tracks
+                ?: SimpMusicExtractorEngine.DEFAULT_SEED_TRACKS
             return
         }
         searchJob = viewModelScope.launch {
@@ -222,20 +357,53 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
     fun importSpotifyPlaylist(url: String) {
         if (url.isBlank()) return
         viewModelScope.launch {
-            _spotifyImportStatus.value = "Connecting directly to Spotify Embed…"
+            _spotifyImportStatus.value = "Connecting to Spotify…"
             val playlist = SimpMusicExtractorEngine.fetchSpotifyPlaylistDirect(url) { done, total ->
-                _spotifyImportStatus.value = "Matching on YouTube Music ($done / $total)…"
+                _spotifyImportStatus.value = "Importing tracks ($done / $total)…"
             }
             if (playlist != null && playlist.tracks.isNotEmpty()) {
                 val updated = listOf(playlist) + _playlists.value.filterNot { it.id == playlist.id }
                 _playlists.value = updated
                 storage.savePlaylists(updated)
                 _spotifyImportStatus.value = "Imported '${playlist.name}' (${playlist.tracks.size} tracks)"
-                playTrack(playlist.tracks.first(), playlist.tracks)
             } else {
                 _spotifyImportStatus.value = "Could not parse public Spotify playlist URL"
             }
         }
+    }
+
+    fun updatePlaylistCover(playlistId: String, newCoverUrl: String) {
+        val updated = _playlists.value.map { pl ->
+            if (pl.id == playlistId) pl.copy(coverUrl = newCoverUrl) else pl
+        }
+        _playlists.value = updated
+        storage.savePlaylists(updated)
+    }
+
+    fun updatePlaylistTitle(playlistId: String, newTitle: String) {
+        val updated = _playlists.value.map { pl ->
+            if (pl.id == playlistId) pl.copy(name = newTitle) else pl
+        }
+        _playlists.value = updated
+        storage.savePlaylists(updated)
+    }
+
+    fun deletePlaylist(playlistId: String) {
+        val updated = _playlists.value.filterNot { it.id == playlistId }
+        _playlists.value = updated
+        storage.savePlaylists(updated)
+    }
+
+    fun removeTrackFromPlaylist(playlistId: String, videoId: String) {
+        val updated = _playlists.value.map { pl ->
+            if (pl.id == playlistId) {
+                pl.copy(tracks = pl.tracks.filterNot { it.videoId == videoId })
+            } else {
+                pl
+            }
+        }
+        _playlists.value = updated
+        storage.savePlaylists(updated)
     }
 
     fun adjustLyricsOffset(deltaMs: Int) {

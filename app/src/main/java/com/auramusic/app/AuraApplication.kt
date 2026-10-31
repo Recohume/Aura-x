@@ -1,13 +1,39 @@
 package com.auramusic.app
 
 import android.app.Application
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.content.Context
+import android.os.Build
 import com.auramusic.app.core.extractor.SimpMusicExtractorEngine
 import com.auramusic.app.core.media.AuraPlayerManager
 
 class AuraApplication : Application() {
+    companion object {
+        const val CHANNEL_ID = "aura_music_playback"
+    }
+
     override fun onCreate() {
         super.onCreate()
+        createNotificationChannel()
         SimpMusicExtractorEngine.initExtractors()
         AuraPlayerManager.initialize(this)
+    }
+
+    private fun createNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                CHANNEL_ID,
+                "Aura Music Playback",
+                NotificationManager.IMPORTANCE_LOW
+            ).apply {
+                description = "Shows now playing music notification with controls"
+                setShowBadge(false)
+                lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+            }
+            val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            manager.createNotificationChannel(channel)
+        }
     }
 }

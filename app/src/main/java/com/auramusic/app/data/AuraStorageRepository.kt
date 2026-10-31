@@ -78,15 +78,29 @@ class AuraStorageRepository(context: Context) {
     }
 
     fun loadNowPlayingStyle(): NowPlayingStyle {
-        val name = prefs.getString("now_playing_style", NowPlayingStyle.EXPRESSIVE.name)
-        return NowPlayingStyle.entries.firstOrNull { it.name == name } ?: NowPlayingStyle.EXPRESSIVE
+        val name = prefs.getString("now_playing_style", NowPlayingStyle.SPOTIFY.name)
+        return NowPlayingStyle.entries.firstOrNull { it.name == name } ?: NowPlayingStyle.SPOTIFY
     }
 
     fun saveNowPlayingStyle(style: NowPlayingStyle) {
         prefs.edit().putString("now_playing_style", style.name).apply()
     }
 
+    fun recordRecentlyPlayed(track: AuraTrack) {
+        val current = loadRecentlyPlayed().toMutableList()
+        current.removeAll { it.videoId == track.videoId }
+        current.add(0, track)
+        val capped = current.take(30)
+        prefs.edit().putString("recently_played_tracks", serializeTrackArray(capped).toString()).apply()
+    }
+
+    fun loadRecentlyPlayed(): List<AuraTrack> {
+        val raw = prefs.getString("recently_played_tracks", null) ?: return emptyList()
+        return parseTrackArray(raw)
+    }
+
     fun recordTrackPlay(track: AuraTrack): ListeningStats {
+        recordRecentlyPlayed(track)
         val totalMin = prefs.getInt("stats_total_min", 48) + (track.durationSeconds / 60).coerceAtLeast(3)
         val totalPlays = prefs.getInt("stats_tracks_played", 14) + 1
         prefs.edit()

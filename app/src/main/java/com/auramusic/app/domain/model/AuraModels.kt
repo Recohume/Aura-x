@@ -3,9 +3,15 @@ package com.auramusic.app.domain.model
 import androidx.compose.ui.graphics.Color
 
 enum class NowPlayingStyle(val label: String) {
-    CLASSIC("Classic"),
-    EXPRESSIVE("Material 3 Expressive"),
-    APPLE_MUSIC("Apple Music Lyrics")
+    SPOTIFY("Spotify Encore"),
+    LIQUID_GLASS("Blur - Liquid Glass")
+}
+
+enum class PlaybackMode(val label: String) {
+    NORMAL("Normal"),
+    SHUFFLE("Shuffle All"),
+    REPEAT_ALL("Repeat All"),
+    REPEAT_ONE("Repeat One")
 }
 
 data class AuraPalette(
@@ -30,14 +36,20 @@ data class AuraTrack(
     val codec: String = "AAC",
     val loudnessDb: Float = 0f,
     val isDownloaded: Boolean = false,
-    val localFilePath: String? = null
+    val localFilePath: String? = null,
+    val isExplicit: Boolean = false,
+    val hasLyricsBadge: Boolean = true
 ) {
     val highResArtworkUrl: String
         get() = when {
             artworkUrl.isNotBlank() && (artworkUrl.contains("googleusercontent.com") || artworkUrl.contains("ggpht.com")) ->
-                artworkUrl.replace(Regex("=w\\d+-h\\d+[^&?]*"), "=w544-h544-l90-rj")
+                artworkUrl.replace(Regex("=w\\d+-h\\d+[^&?]*"), "=w1200-h1200-l90-rj")
+            artworkUrl.isNotBlank() && artworkUrl.contains("i.scdn.co") ->
+                artworkUrl
+            artworkUrl.isNotBlank() && artworkUrl.contains("youtube.com") ->
+                artworkUrl.replace("hqdefault.jpg", "maxresdefault.jpg")
             artworkUrl.isNotBlank() -> artworkUrl
-            videoId.isNotBlank() -> "https://img.youtube.com/vi/$videoId/hqdefault.jpg"
+            videoId.isNotBlank() -> "https://img.youtube.com/vi/$videoId/maxresdefault.jpg"
             else -> ""
         }
 }
@@ -100,44 +112,44 @@ data class EqualizerPreset(
 
 val SIMPMUSIC_EQ_PRESETS = listOf(
     EqualizerPreset(
-        id = "harman_autoeq",
-        name = "Harman Target (AutoEq)",
-        subtitle = "SimpMusic reference headphone curve",
+        id = "balanced",
+        name = "Balanced Sound",
+        subtitle = "Natural and clean audio profile",
         bandsDb = listOf(4.2f, 3.5f, 1.8f, -0.4f, -1.2f, 0.6f, 2.4f, 3.8f, 2.9f, 1.5f),
         preampGain = 0.92f
     ),
     EqualizerPreset(
-        id = "flat",
-        name = "Studio Flat",
-        subtitle = "Uncolored bit-transparent output",
-        bandsDb = listOf(0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f),
-        preampGain = 1.0f
-    ),
-    EqualizerPreset(
         id = "bass_boost",
-        name = "Sub-Bass Punch",
-        subtitle = "Deep low-end warmth without muddying vocals",
+        name = "Bass Booster",
+        subtitle = "Rich and deep low frequencies",
         bandsDb = listOf(6.5f, 5.2f, 3.4f, 1.0f, 0f, 0f, 0.5f, 1.2f, 1.5f, 1.0f),
         preampGain = 0.86f
     ),
     EqualizerPreset(
-        id = "vocal_presence",
-        name = "Vocal Presence",
-        subtitle = "Forward midrange & intimate studio vocals",
+        id = "vocal_booster",
+        name = "Vocal Booster",
+        subtitle = "Enhanced vocals and speech clarity",
         bandsDb = listOf(-1.5f, -1.0f, 0.5f, 2.8f, 4.2f, 4.0f, 2.5f, 1.0f, 0f, -0.5f),
         preampGain = 0.94f
     ),
     EqualizerPreset(
-        id = "hifi_clarity",
-        name = "Hi-Fi V-Shape",
-        subtitle = "Crisp treble air & tight punchy lows",
+        id = "treble_booster",
+        name = "Treble Booster",
+        subtitle = "Crisp, bright acoustic highs",
         bandsDb = listOf(4.5f, 3.8f, 1.2f, -1.0f, -1.5f, -0.5f, 2.0f, 4.0f, 5.2f, 4.8f),
         preampGain = 0.90f
     ),
     EqualizerPreset(
+        id = "studio",
+        name = "Studio Reference",
+        subtitle = "Uncolored, authentic sound",
+        bandsDb = listOf(0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f),
+        preampGain = 1.0f
+    ),
+    EqualizerPreset(
         id = "late_night",
         name = "Late Night Lounge",
-        subtitle = "Warm dynamics for low-volume listening",
+        subtitle = "Soft dynamics for quiet listening",
         bandsDb = listOf(3.0f, 2.5f, 1.5f, 0.5f, 0f, -1.0f, -1.5f, -1.0f, 0.5f, 1.5f),
         preampGain = 0.88f
     )
@@ -171,3 +183,48 @@ data class ListeningStats(
     val topGenres: List<Pair<String, Int>> = emptyList(),
     val peakHourLabel: String = "10:00 PM"
 )
+
+data class YtmTopArtist(
+    val id: String,
+    val name: String,
+    val subscribers: String,
+    val avatarUrl: String
+)
+
+data class YtmCommunityPlaylist(
+    val id: String,
+    val title: String,
+    val author: String,
+    val trackCount: String,
+    val artworkUrl: String
+)
+
+data class ArtistSong(
+    val rank: Int,
+    val track: AuraTrack,
+    val playCount: String = ""
+)
+
+data class ArtistDetail(
+    val id: String,
+    val name: String,
+    val subscribers: String,
+    val bannerUrl: String,
+    val topSongs: List<ArtistSong>
+)
+
+data class PlaylistTrackItem(
+    val rank: Int,
+    val track: AuraTrack,
+    val viewCount: String = ""
+)
+
+data class PlaylistDetail(
+    val id: String,
+    val title: String,
+    val author: String,
+    val trackCount: String,
+    val bannerUrl: String,
+    val tracks: List<PlaylistTrackItem>
+)
+
