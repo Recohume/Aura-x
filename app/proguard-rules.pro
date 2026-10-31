@@ -1,0 +1,6 @@
+-keep class org.schabi.newpipe.extractor.** { *; }
+-keep class dev.maxrave.pipepipe.extractor.** { *; }
+-keep class org.mozilla.javascript.** { *; }
+-dontwarn org.schabi.newpipe.extractor.**
+-dontwarn dev.maxrave.pipepipe.extractor.**
+-dontwarn org.mozilla.javascript.**
