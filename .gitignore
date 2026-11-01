@@ -51,4 +51,3 @@ Thumbs.db
 # Credentials
 .env/
 .env*
-*google-services.json

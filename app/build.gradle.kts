@@ -20,9 +20,14 @@ android {
         val propVersionCode = (project.findProperty("versionCode") as? String)?.toIntOrNull()
         versionCode = propVersionCode ?: ciVersionCode ?: 3
 
+        versionName = "1.3"
         val propVersionName = project.findProperty("versionName") as? String
         val envVersionName = System.getenv("APP_VERSION_NAME")
-        versionName = propVersionName ?: envVersionName ?: "1.3"
+        if (propVersionName != null) {
+            versionName = propVersionName
+        } else if (envVersionName != null) {
+            versionName = envVersionName
+        }
 
         vectorDrawables {
             useSupportLibrary = true
