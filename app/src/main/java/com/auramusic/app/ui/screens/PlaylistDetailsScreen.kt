@@ -1,5 +1,13 @@
 package com.auramusic.app.ui.screens
 
+import android.Manifest
+import android.content.Context
+import android.content.pm.PackageManager
+import android.net.Uri
+import android.os.Build
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -27,6 +35,7 @@ import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Image
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.RestartAlt
 import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
@@ -43,24 +52,34 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import coil.compose.AsyncImage
+import com.auramusic.app.core.media.AuraPlayerManager
 import com.auramusic.app.domain.model.AuraPlaylist
 import com.auramusic.app.domain.model.AuraTrack
+import com.auramusic.app.ui.components.AuraPlaylistCover
+import com.auramusic.app.ui.components.AuraTrackOptionsModal
 import com.auramusic.app.ui.theme.AuraPlayGreen
 import com.auramusic.app.ui.theme.SpotifyCard
 import com.auramusic.app.ui.theme.SpotifyPitchBlack
 import com.auramusic.app.ui.theme.TextPrimary
 import com.auramusic.app.ui.theme.TextSecondary
+import java.io.File
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @Composable
 fun PlaylistDetailsScreen(
@@ -76,13 +95,55 @@ fun PlaylistDetailsScreen(
     onDownloadTrack: (AuraTrack) -> Unit,
     onUpdateCover: (newCoverUrl: String) -> Unit,
     onUpdateTitle: (newTitle: String) -> Unit,
-    onDeletePlaylist: () -> Unit
+    onDeletePlaylist: () -> Unit,
+    onOpenArtist: (String) -> Unit = {}
 ) {
-    var showEditCoverDialog by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+    var selectedModalTrack by remember { mutableStateOf<AuraTrack?>(null) }
     var showEditTitleDialog by remember { mutableStateOf(false) }
     var showMenu by remember { mutableStateOf(false) }
-    var newCoverInput by remember { mutableStateOf(playlist.coverUrl) }
     var newTitleInput by remember { mutableStateOf(playlist.name) }
+
+    // Media Picker Launcher for selecting an image from the user's files/gallery
+    val mediaPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            coroutineScope.launch(Dispatchers.IO) {
+                val localPath = savePlaylistCoverLocally(context, playlist.id, uri)
+                withContext(Dispatchers.Main) {
+                    onUpdateCover(localPath)
+                    Toast.makeText(context, "Playlist cover updated!", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
+    // Storage/Media Permission Launcher prompting user to allow files
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) {
+            mediaPickerLauncher.launch("image/*")
+        } else {
+            Toast.makeText(context, "Storage permission is required to choose a custom cover", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    val onPickCoverImage: () -> Unit = {
+        val permission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            Manifest.permission.READ_MEDIA_IMAGES
+        } else {
+            Manifest.permission.READ_EXTERNAL_STORAGE
+        }
+        val hasPermission = ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED
+        if (hasPermission) {
+            mediaPickerLauncher.launch("image/*")
+        } else {
+            permissionLauncher.launch(permission)
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -137,10 +198,22 @@ fun PlaylistDetailsScreen(
                         },
                         onClick = {
                             showMenu = false
-                            newCoverInput = playlist.coverUrl
-                            showEditCoverDialog = true
+                            onPickCoverImage()
                         }
                     )
+                    if (playlist.coverUrl.isNotBlank()) {
+                        DropdownMenuItem(
+                            text = { Text("Reset to Spotify Collage", color = TextPrimary) },
+                            leadingIcon = {
+                                Icon(Icons.Rounded.RestartAlt, contentDescription = null, tint = TextSecondary)
+                            },
+                            onClick = {
+                                showMenu = false
+                                onUpdateCover("")
+                                Toast.makeText(context, "Cover reset to Spotify collage", Toast.LENGTH_SHORT).show()
+                            }
+                        )
+                    }
                     DropdownMenuItem(
                         text = { Text("Rename Playlist", color = TextPrimary) },
                         leadingIcon = {
@@ -184,31 +257,15 @@ fun PlaylistDetailsScreen(
                             .size(210.dp)
                             .clip(RoundedCornerShape(16.dp))
                             .background(SpotifyCard)
-                            .clickable {
-                                newCoverInput = playlist.coverUrl
-                                showEditCoverDialog = true
-                            },
+                            .clickable { onPickCoverImage() },
                         contentAlignment = Alignment.Center
                     ) {
-                        val displayCover = playlist.coverUrl.ifBlank {
-                            playlist.tracks.firstOrNull()?.highResArtworkUrl ?: ""
-                        }
-
-                        if (displayCover.isNotBlank()) {
-                            AsyncImage(
-                                model = displayCover,
-                                contentDescription = playlist.name,
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier.fillMaxSize()
-                            )
-                        } else {
-                            Icon(
-                                imageVector = Icons.Rounded.Image,
-                                contentDescription = "Cover Image",
-                                tint = TextSecondary,
-                                modifier = Modifier.size(64.dp)
-                            )
-                        }
+                        AuraPlaylistCover(
+                            coverUrl = playlist.coverUrl,
+                            tracks = playlist.tracks,
+                            modifier = Modifier.fillMaxSize(),
+                            shape = RoundedCornerShape(16.dp)
+                        )
 
                         // Subtle overlay badge: "Edit Cover"
                         Surface(
@@ -217,6 +274,7 @@ fun PlaylistDetailsScreen(
                             modifier = Modifier
                                 .align(Alignment.BottomEnd)
                                 .padding(8.dp)
+                                .clickable { onPickCoverImage() }
                         ) {
                             Row(
                                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
@@ -343,92 +401,11 @@ fun PlaylistDetailsScreen(
                     isDownloading = downloadingIds.contains(track.videoId),
                     onClick = { onPlayTrack(track, playlist.tracks) },
                     onToggleFavorite = { onToggleFavorite(track) },
-                    onDownload = { onDownloadTrack(track) }
+                    onDownload = { onDownloadTrack(track) },
+                    onOptionsClick = { selectedModalTrack = track }
                 )
             }
         }
-    }
-
-    // Dialog to modify Playlist Cover
-    if (showEditCoverDialog) {
-        AlertDialog(
-            onDismissRequest = { showEditCoverDialog = false },
-            containerColor = SpotifyCard,
-            title = {
-                Text("Modify Playlist Cover", color = TextPrimary, fontWeight = FontWeight.Bold)
-            },
-            text = {
-                Column {
-                    Text(
-                        text = "Enter a direct image URL or tap a song below to use its artwork:",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = TextSecondary
-                    )
-                    Spacer(modifier = Modifier.height(10.dp))
-                    OutlinedTextField(
-                        value = newCoverInput,
-                        onValueChange = { newCoverInput = it },
-                        placeholder = { Text("https://image-url...") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = AuraPlayGreen,
-                            unfocusedBorderColor = TextSecondary.copy(alpha = 0.3f),
-                            focusedTextColor = TextPrimary,
-                            unfocusedTextColor = TextPrimary
-                        )
-                    )
-                    Spacer(modifier = Modifier.height(14.dp))
-                    Text(
-                        text = "Or pick artwork from tracks:",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = TextSecondary,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    LazyRow(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        items(playlist.tracks.take(12), key = { it.videoId }) { t ->
-                            Box(
-                                modifier = Modifier
-                                    .size(52.dp)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(Color(0xFF222222))
-                                    .clickable {
-                                        newCoverInput = t.highResArtworkUrl
-                                    }
-                            ) {
-                                AsyncImage(
-                                    model = t.highResArtworkUrl,
-                                    contentDescription = t.title,
-                                    contentScale = ContentScale.Crop,
-                                    modifier = Modifier.fillMaxSize()
-                                )
-                            }
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        if (newCoverInput.isNotBlank()) {
-                            onUpdateCover(newCoverInput.trim())
-                        }
-                        showEditCoverDialog = false
-                    }
-                ) {
-                    Text("Save", color = AuraPlayGreen, fontWeight = FontWeight.Bold)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showEditCoverDialog = false }) {
-                    Text("Cancel", color = TextSecondary)
-                }
-            }
-        )
     }
 
     // Dialog to rename playlist
@@ -471,5 +448,56 @@ fun PlaylistDetailsScreen(
                 }
             }
         )
+    }
+
+    selectedModalTrack?.let { modalTrack ->
+        AuraTrackOptionsModal(
+            track = modalTrack,
+            isFavorite = favorites.any { it.videoId == modalTrack.videoId },
+            onDismiss = { selectedModalTrack = null },
+            onPlayNext = {
+                AuraPlayerManager.playNext(modalTrack)
+                Toast.makeText(context, "Playing next: ${modalTrack.title}", Toast.LENGTH_SHORT).show()
+                selectedModalTrack = null
+            },
+            onAddToQueue = {
+                AuraPlayerManager.enqueueTrack(modalTrack)
+                Toast.makeText(context, "Added to queue: ${modalTrack.title}", Toast.LENGTH_SHORT).show()
+                selectedModalTrack = null
+            },
+            onToggleFavorite = {
+                val wasFav = favorites.any { it.videoId == modalTrack.videoId }
+                onToggleFavorite(modalTrack)
+                val msg = if (wasFav) "Removed from Liked Songs" else "Added to Liked Songs"
+                Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                selectedModalTrack = null
+            },
+            onAddToPlaylist = {
+                Toast.makeText(context, "Saved to library", Toast.LENGTH_SHORT).show()
+                selectedModalTrack = null
+            },
+            onGoToArtist = {
+                selectedModalTrack = null
+                onOpenArtist(modalTrack.artist)
+            }
+        )
+    }
+}
+
+/**
+ * Persists picked image content URI into private app storage for stable playlist cover display.
+ */
+private fun savePlaylistCoverLocally(context: Context, playlistId: String, uri: Uri): String {
+    return try {
+        val dir = File(context.filesDir, "playlist_covers").apply { mkdirs() }
+        val destFile = File(dir, "cover_${playlistId}_${System.currentTimeMillis()}.jpg")
+        context.contentResolver.openInputStream(uri)?.use { input ->
+            destFile.outputStream().use { output ->
+                input.copyTo(output)
+            }
+        }
+        destFile.absolutePath
+    } catch (e: Exception) {
+        uri.toString()
     }
 }

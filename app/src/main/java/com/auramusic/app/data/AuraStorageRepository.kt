@@ -94,6 +94,12 @@ class AuraStorageRepository(context: Context) {
         prefs.edit().putString("recently_played_tracks", serializeTrackArray(capped).toString()).apply()
     }
 
+    fun removeRecentlyPlayed(videoId: String) {
+        val current = loadRecentlyPlayed().toMutableList()
+        current.removeAll { it.videoId == videoId }
+        prefs.edit().putString("recently_played_tracks", serializeTrackArray(current).toString()).apply()
+    }
+
     fun loadRecentlyPlayed(): List<AuraTrack> {
         val raw = prefs.getString("recently_played_tracks", null) ?: return emptyList()
         return parseTrackArray(raw)

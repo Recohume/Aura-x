@@ -32,8 +32,10 @@ import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Equalizer
 import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.Lyrics
+import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.Storage
+import androidx.compose.material.icons.rounded.SystemUpdate
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -285,17 +287,44 @@ fun SettingsScreen(viewModel: AuraViewModel) {
                 onClick = {
                     Toast.makeText(context, "Stream cache successfully cleared", Toast.LENGTH_SHORT).show()
                 },
+                trailingContent = { }
+            )
+
+            Spacer(modifier = Modifier.height(34.dp))
+        }
+
+        // 5b. Updates & Notifications
+        item {
+            SettingsCategoryHeader(title = "Updates & notifications")
+            Spacer(modifier = Modifier.height(10.dp))
+
+            ModernClickableRow(
+                icon = Icons.Rounded.SystemUpdate,
+                title = "Check for Updates",
+                subtitle = "Query GitHub Releases directly for new APK builds",
+                onClick = {
+                    viewModel.checkForUpdates(force = true)
+                },
                 trailingContent = {
-                    Text(
-                        text = "Clear",
-                        color = Color(0xFFFF5252),
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Rounded.KeyboardArrowRight,
+                        contentDescription = "Check for Updates",
+                        tint = TextSecondary,
+                        modifier = Modifier.size(20.dp)
                     )
                 }
             )
 
-            Spacer(modifier = Modifier.height(34.dp))
+            SettingsDivider()
+
+            ModernSettingsRow(
+                icon = Icons.Rounded.Notifications,
+                title = "Release Push Notifications",
+                subtitle = "Receive FCM alerts when new versions are published",
+                trailingContent = { }
+            )
+
+            Spacer(modifier = Modifier.height(30.dp))
         }
 
         // 6. About AURA Music (Clean minimal lockup with official Aura Logo & dynamic version)
@@ -316,7 +345,7 @@ fun SettingsScreen(viewModel: AuraViewModel) {
                 Spacer(modifier = Modifier.width(14.dp))
                 Column {
                     Text(
-                        text = "AURA Music v$appVersionName ($appVersionCode)",
+                        text = "AURA Music v$appVersionName",
                         color = Color.White,
                         fontWeight = FontWeight.Bold,
                         fontSize = 15.sp

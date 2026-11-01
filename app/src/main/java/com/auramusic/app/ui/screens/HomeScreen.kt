@@ -119,6 +119,7 @@ fun HomeScreen(
     onOpenArtist: (YtmTopArtist) -> Unit = {},
     onPlayCommunityPlaylist: (YtmCommunityPlaylist) -> Unit = {},
     onOpenPlaylist: (YtmCommunityPlaylist) -> Unit = {},
+    onOpenUserPlaylist: (AuraPlaylist) -> Unit = {},
     onSelectCategory: (String) -> Unit = {},
     onPlayMood: (MoodCategory) -> Unit,
     onToggleFavorite: (AuraTrack) -> Unit,
@@ -130,6 +131,7 @@ fun HomeScreen(
     val heroTrack = liveTopTracks.firstOrNull()
     val playlistTracks = liveTopTracks
     val displayedTracks = if (activeCategory != "All" && categoryTracks.isNotEmpty()) categoryTracks else playlistTracks
+    var visibleTrackCount by remember(displayedTracks) { androidx.compose.runtime.mutableIntStateOf(20) }
 
     val greeting = remember {
         val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
@@ -192,17 +194,17 @@ fun HomeScreen(
                             text = filter,
                             color = if (isSelected) Color.Black else AuraPillInactiveText,
                             fontWeight = FontWeight.Bold,
-                            fontSize = 12.sp,
-                            modifier = Modifier.padding(horizontal = 18.dp, vertical = 8.dp)
+                            fontSize = 11.5.sp,
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp)
                         )
                     }
                 }
             }
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(16.dp))
         }
 
         // 3. Top Artists Carousel (Live YouTube Music Charts FEmusic_charts)
-        if (topArtists.isNotEmpty()) {
+        if (topArtists.isNotEmpty() || isLoading) {
             item {
                 Column(modifier = Modifier.fillMaxWidth().padding(bottom = 22.dp)) {
                     Row(
@@ -221,47 +223,51 @@ fun HomeScreen(
                         )
                     }
                     Spacer(modifier = Modifier.height(14.dp))
-                    LazyRow(
-                        contentPadding = PaddingValues(horizontal = 20.dp),
-                        horizontalArrangement = Arrangement.spacedBy(16.dp)
-                    ) {
-                        items(topArtists, key = { "artist_${it.id}" }) { artist ->
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                modifier = Modifier
-                                    .width(88.dp)
-                                    .clip(RoundedCornerShape(16.dp))
-                                    .clickable { onOpenArtist(artist) }
-                            ) {
-                                Box(
+                    if (topArtists.isEmpty() && isLoading) {
+                        com.auramusic.app.ui.components.ArtistCarouselSkeleton()
+                    } else {
+                        LazyRow(
+                            contentPadding = PaddingValues(horizontal = 20.dp),
+                            horizontalArrangement = Arrangement.spacedBy(16.dp)
+                        ) {
+                            items(topArtists, key = { "artist_${it.id}" }) { artist ->
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
                                     modifier = Modifier
-                                        .size(80.dp)
-                                        .clip(CircleShape)
-                                        .background(Color(0xFF1E2028))
+                                        .width(88.dp)
+                                        .clip(RoundedCornerShape(16.dp))
+                                        .clickable { onOpenArtist(artist) }
                                 ) {
-                                    AsyncImage(
-                                        model = artist.avatarUrl,
-                                        contentDescription = artist.name,
-                                        contentScale = ContentScale.Crop,
-                                        modifier = Modifier.fillMaxSize()
+                                    Box(
+                                        modifier = Modifier
+                                            .size(80.dp)
+                                            .clip(CircleShape)
+                                            .background(Color(0xFF1E2028))
+                                    ) {
+                                        AsyncImage(
+                                            model = artist.highResAvatarUrl,
+                                            contentDescription = artist.name,
+                                            contentScale = ContentScale.Crop,
+                                            modifier = Modifier.fillMaxSize()
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Text(
+                                        text = artist.name,
+                                        color = Color.White,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 12.5.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        text = artist.subscribers,
+                                        color = TextSecondary,
+                                        fontSize = 10.5.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
                                     )
                                 }
-                                Spacer(modifier = Modifier.height(8.dp))
-                                Text(
-                                    text = artist.name,
-                                    color = Color.White,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 12.5.sp,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                Text(
-                                    text = artist.subscribers,
-                                    color = TextSecondary,
-                                    fontSize = 10.5.sp,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
                             }
                         }
                     }
@@ -270,7 +276,7 @@ fun HomeScreen(
         }
 
         // 4b. Top Playlists / User-Uploaded Community Playlists
-        if (communityPlaylists.isNotEmpty()) {
+        if (communityPlaylists.isNotEmpty() || isLoading) {
             item {
                 Column(modifier = Modifier.fillMaxWidth().padding(bottom = 22.dp)) {
                     Row(
@@ -295,59 +301,63 @@ fun HomeScreen(
                         )
                     }
                     Spacer(modifier = Modifier.height(14.dp))
-                    LazyRow(
-                        contentPadding = PaddingValues(horizontal = 20.dp),
-                        horizontalArrangement = Arrangement.spacedBy(14.dp)
-                    ) {
-                        items(communityPlaylists, key = { "ytm_pl_${it.id}" }) { playlist ->
-                            Column(
-                                modifier = Modifier
-                                    .width(135.dp)
-                                    .clip(RoundedCornerShape(16.dp))
-                                    .clickable { onOpenPlaylist(playlist) }
-                            ) {
-                                Box(
+                    if (communityPlaylists.isEmpty() && isLoading) {
+                        com.auramusic.app.ui.components.PlaylistCarouselSkeleton()
+                    } else {
+                        LazyRow(
+                            contentPadding = PaddingValues(horizontal = 20.dp),
+                            horizontalArrangement = Arrangement.spacedBy(14.dp)
+                        ) {
+                            items(communityPlaylists, key = { "ytm_pl_${it.id}" }) { playlist ->
+                                Column(
                                     modifier = Modifier
-                                        .size(135.dp)
-                                        .clip(RoundedCornerShape(14.dp))
-                                        .background(Color(0xFF1E2028))
+                                        .width(135.dp)
+                                        .clip(RoundedCornerShape(16.dp))
+                                        .clickable { onOpenPlaylist(playlist) }
                                 ) {
-                                    AsyncImage(
-                                        model = playlist.artworkUrl,
-                                        contentDescription = playlist.title,
-                                        contentScale = ContentScale.Crop,
-                                        modifier = Modifier.fillMaxSize()
-                                    )
-                                    Surface(
-                                        shape = RoundedCornerShape(topStart = 8.dp),
-                                        color = Color.Black.copy(alpha = 0.70f),
-                                        modifier = Modifier.align(Alignment.BottomEnd)
+                                    Box(
+                                        modifier = Modifier
+                                            .size(135.dp)
+                                            .clip(RoundedCornerShape(14.dp))
+                                            .background(Color(0xFF1E2028))
                                     ) {
-                                        Text(
-                                            text = playlist.trackCount,
-                                            color = Color.White.copy(alpha = 0.85f),
-                                            fontSize = 10.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
+                                        AsyncImage(
+                                            model = playlist.highResArtworkUrl,
+                                            contentDescription = playlist.title,
+                                            contentScale = ContentScale.Crop,
+                                            modifier = Modifier.fillMaxSize()
                                         )
+                                        Surface(
+                                            shape = RoundedCornerShape(topStart = 8.dp),
+                                            color = Color.Black.copy(alpha = 0.70f),
+                                            modifier = Modifier.align(Alignment.BottomEnd)
+                                        ) {
+                                            Text(
+                                                text = playlist.trackCount,
+                                                color = Color.White.copy(alpha = 0.85f),
+                                                fontSize = 10.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
+                                            )
+                                        }
                                     }
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Text(
+                                        text = playlist.title,
+                                        color = Color.White,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 13.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        text = playlist.author,
+                                        color = TextSecondary,
+                                        fontSize = 11.5.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
                                 }
-                                Spacer(modifier = Modifier.height(8.dp))
-                                Text(
-                                    text = playlist.title,
-                                    color = Color.White,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 13.sp,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                Text(
-                                    text = playlist.author,
-                                    color = TextSecondary,
-                                    fontSize = 11.5.sp,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
                             }
                         }
                     }
@@ -449,44 +459,20 @@ fun HomeScreen(
                         horizontalArrangement = Arrangement.spacedBy(14.dp)
                     ) {
                         items(userPlaylists, key = { "pl_${it.id}" }) { pl ->
-                            val firstTrack = pl.tracks.firstOrNull()
                             Column(
                                 modifier = Modifier
                                     .width(120.dp)
                                     .clip(RoundedCornerShape(16.dp))
                                     .clickable {
-                                        if (pl.tracks.isNotEmpty()) {
-                                            onPlayTrack(pl.tracks.first(), pl.tracks)
-                                        }
+                                        onOpenUserPlaylist(pl)
                                     }
                             ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(120.dp)
-                                        .clip(RoundedCornerShape(16.dp))
-                                        .background(AuraPillInactive)
-                                ) {
-                                    if (firstTrack != null) {
-                                        AsyncImage(
-                                            model = firstTrack.highResArtworkUrl,
-                                            contentDescription = pl.name,
-                                            contentScale = ContentScale.Crop,
-                                            modifier = Modifier.fillMaxSize()
-                                        )
-                                    } else {
-                                        Box(
-                                            modifier = Modifier.fillMaxSize(),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Rounded.LibraryMusic,
-                                                contentDescription = null,
-                                                tint = Color.White.copy(alpha = 0.5f),
-                                                modifier = Modifier.size(36.dp)
-                                            )
-                                        }
-                                    }
-                                }
+                                com.auramusic.app.ui.components.AuraPlaylistCover(
+                                    coverUrl = pl.coverUrl,
+                                    tracks = pl.tracks,
+                                    modifier = Modifier.size(120.dp),
+                                    shape = RoundedCornerShape(16.dp)
+                                )
                                 Spacer(modifier = Modifier.height(8.dp))
                                 Text(
                                     text = pl.name,
@@ -537,23 +523,73 @@ fun HomeScreen(
             Spacer(modifier = Modifier.height(10.dp))
         }
 
-        // 6. Tracklist Items with Badges (LYRICS / E)
-        items(displayedTracks, key = { it.videoId }) { track ->
-            val isFav = favorites.any { it.videoId == track.videoId }
-            val isDown = downloads.any { it.videoId == track.videoId }
-            val isDownloading = downloadingIds.contains(track.videoId)
-            val isCurrent = currentPlayingId == track.videoId
+        // 6. Tracklist Items with Badges (LYRICS / E) - Paginated to avoid rate limits
+        if ((isLoading || isCategoryLoading) && displayedTracks.isEmpty()) {
+            items(6) {
+                com.auramusic.app.ui.components.TrackItemSkeleton()
+            }
+        } else {
+            val currentBatch = displayedTracks.take(visibleTrackCount)
+            items(currentBatch, key = { it.videoId }) { track ->
+                val isFav = favorites.any { it.videoId == track.videoId }
+                val isDown = downloads.any { it.videoId == track.videoId }
+                val isDownloading = downloadingIds.contains(track.videoId)
+                val isCurrent = currentPlayingId == track.videoId
 
-            SpotifyTrackRowItem(
-                track = track,
-                isCurrent = isCurrent,
-                isFavorite = isFav,
-                isDownloaded = isDown,
-                isDownloading = isDownloading,
-                onClick = { onPlayTrack(track, displayedTracks) },
-                onToggleFavorite = { onToggleFavorite(track) },
-                onDownload = { onDownloadTrack(track) }
-            )
+                SpotifyTrackRowItem(
+                    track = track,
+                    isCurrent = isCurrent,
+                    isFavorite = isFav,
+                    isDownloaded = isDown,
+                    isDownloading = isDownloading,
+                    onClick = { onPlayTrack(track, displayedTracks) },
+                    onToggleFavorite = { onToggleFavorite(track) },
+                    onDownload = { onDownloadTrack(track) }
+                )
+            }
+        }
+
+        // Pagination "See More" Button
+        if (visibleTrackCount < displayedTracks.size) {
+            item {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp, vertical = 12.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Surface(
+                        shape = RoundedCornerShape(24.dp),
+                        color = Color(0xFF1E2028),
+                        border = BorderStroke(1.dp, Color(0xFF2E323D)),
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(24.dp))
+                            .clickable {
+                                visibleTrackCount = (visibleTrackCount + 20).coerceAtMost(displayedTracks.size)
+                            }
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 24.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.ArrowDownward,
+                                contentDescription = "See More",
+                                tint = AuraNeonLime,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "See More (${displayedTracks.size - visibleTrackCount} more tracks)",
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp
+                            )
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -893,7 +929,8 @@ fun SpotifyTrackRowItem(
     isDownloading: Boolean,
     onClick: () -> Unit,
     onToggleFavorite: () -> Unit,
-    onDownload: () -> Unit
+    onDownload: () -> Unit,
+    onOptionsClick: (() -> Unit)? = null
 ) {
     Row(
         modifier = Modifier
@@ -936,21 +973,35 @@ fun SpotifyTrackRowItem(
 
         Spacer(modifier = Modifier.width(8.dp))
 
-        // Circular Play Button matching the reference
-        Box(
-            modifier = Modifier
-                .size(38.dp)
-                .clip(CircleShape)
-                .background(if (isCurrent) AuraNeonLime else AuraCircleButtonBg)
-                .clickable(onClick = onClick),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                imageVector = if (isCurrent) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                contentDescription = "Play",
-                tint = if (isCurrent) Color.Black else Color.White,
-                modifier = Modifier.size(18.dp)
-            )
+        if (onOptionsClick != null) {
+            IconButton(
+                onClick = onOptionsClick,
+                modifier = Modifier.size(38.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.MoreVert,
+                    contentDescription = "Options for ${track.title}",
+                    tint = TextSecondary,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+        } else {
+            // Circular Play Button matching the reference
+            Box(
+                modifier = Modifier
+                    .size(38.dp)
+                    .clip(CircleShape)
+                    .background(if (isCurrent) AuraNeonLime else AuraCircleButtonBg)
+                    .clickable(onClick = onClick),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = if (isCurrent) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                    contentDescription = "Play",
+                    tint = if (isCurrent) Color.Black else Color.White,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
         }
     }
 }

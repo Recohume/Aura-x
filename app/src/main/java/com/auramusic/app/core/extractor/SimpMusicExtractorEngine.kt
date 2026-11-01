@@ -365,12 +365,22 @@ object SimpMusicExtractorEngine {
     suspend fun searchYouTubeMusic(query: String, filter: String = "songs"): List<AuraTrack> =
         withContext(Dispatchers.IO) {
             if (query.isBlank()) return@withContext emptyList()
+            val normFilter = filter.lowercase().trim()
+            val effectiveQuery = when (normFilter) {
+                "videos" -> "$query music video"
+                "playlists" -> "$query playlist"
+                "albums" -> "$query album"
+                else -> query
+            }
             try {
-                // Params for YouTube Music Songs filter vs Videos filter
-                val params = when (filter.lowercase()) {
-                    "songs" -> "EgWKAQIIAWoKEAkQBRAKEAMQBA%3D%3D"
-                    "videos" -> "EgWKAQIQAWoKEAkQChAFEAMQBA%3D%3D"
-                    else -> null
+                // Valid Base64 InnerTube params for returning playable Song & Video items
+                val params = when (normFilter) {
+                    "songs" -> "EgWKAQIIAWoKEAkQBRAKEAMQBA=="
+                    "videos" -> "EgWKAQIQAWoKEAkQChAFEAMQBA=="
+                    "playlists" -> "EgWKAQIIAWoKEAkQBRAKEAMQBA=="
+                    "albums" -> "EgWKAQIIAWoKEAkQBRAKEAMQBA=="
+                    "artists" -> "EgWKAQIIAWoKEAkQBRAKEAMQBA=="
+                    else -> null // "all"
                 }
                 val payload = JSONObject().apply {
                     put("context", JSONObject().apply {
@@ -381,7 +391,7 @@ object SimpMusicExtractorEngine {
                             put("gl", "US")
                         })
                     })
-                    put("query", query)
+                    put("query", effectiveQuery)
                     if (params != null) {
                         put("params", params)
                     }
@@ -403,10 +413,38 @@ object SimpMusicExtractorEngine {
                     }
                 }
 
+                // If "videos" filter with strict param returned empty, retry with un-parameterized video query
+                if (tracks.isEmpty() && normFilter != "all") {
+                    val retryPayload = JSONObject().apply {
+                        put("context", JSONObject().apply {
+                            put("client", JSONObject().apply {
+                                put("clientName", "WEB_REMIX")
+                                put("clientVersion", "1.20250312.01.00")
+                                put("hl", "en")
+                                put("gl", "US")
+                            })
+                        })
+                        put("query", effectiveQuery)
+                    }
+                    val retryReq = Request.Builder()
+                        .url("https://music.youtube.com/youtubei/v1/search?prettyPrint=false")
+                        .header("User-Agent", USER_AGENT)
+                        .header("Origin", "https://music.youtube.com")
+                        .header("Referer", "https://music.youtube.com/")
+                        .post(retryPayload.toString().toRequestBody("application/json".toMediaType()))
+                        .build()
+                    httpClient.newCall(retryReq).execute().use { resp ->
+                        if (resp.isSuccessful) {
+                            val bodyStr = resp.body?.string() ?: ""
+                            parseYtmSearchTracks(JSONObject(bodyStr), tracks)
+                        }
+                    }
+                }
+
                 if (tracks.isNotEmpty()) {
                     // Proactively pre-warm the top search result for instant 0ms playback when tapped!
                     prefetchStream(tracks.first().videoId)
-                    return@withContext tracks
+                    return@withContext tracks.distinctBy { it.videoId }
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "WEB_REMIX search fallback to NewPipe: ${e.message}")
@@ -415,7 +453,7 @@ object SimpMusicExtractorEngine {
             // Fallback to BraveNewPipe search
             try {
                 initExtractors()
-                val extractor = BraveServiceList.YouTube.getSearchExtractor(query)
+                val extractor = BraveServiceList.YouTube.getSearchExtractor(effectiveQuery)
                 extractor.fetchPage()
                 val items = extractor.initialPage?.items ?: emptyList()
                 val results = items.filterIsInstance<StreamInfoItem>().take(20).mapNotNull { item ->
@@ -435,7 +473,7 @@ object SimpMusicExtractorEngine {
                     )
                 }
                 results.firstOrNull()?.let { prefetchStream(it.videoId) }
-                results
+                results.distinctBy { it.videoId }
             } catch (e: Exception) {
                 Log.e(TAG, "Search failed: ${e.message}")
                 emptyList()
@@ -894,11 +932,17 @@ object SimpMusicExtractorEngine {
     }
 
     /**
-     * Fetches detailed playlist overview with banner artwork, creator, total tracks, and ranked track list with views/durations.
+     * Fetches detailed playlist, album, single, or EP overview with banner artwork, creator,
+     * total views/plays for the whole collection, and ranked track list with views/plays per song.
      */
     suspend fun fetchPlaylistDetail(playlist: YtmCommunityPlaylist): PlaylistDetail = withContext(Dispatchers.IO) {
+        val playCountRegex = Regex("""([,\d]+(?:\.\d+)?\s*[KkMmBb]?\s*(?:plays|views))""", RegexOption.IGNORE_CASE)
         try {
-            val actualBrowseId = if (playlist.id.startsWith("VL") || playlist.id.startsWith("FEmusic_")) playlist.id else "VL${playlist.id}"
+            val actualBrowseId = when {
+                playlist.id.startsWith("VL") || playlist.id.startsWith("MPREb_") || playlist.id.startsWith("FEmusic_") -> playlist.id
+                playlist.id.startsWith("OLAK5uy_") || playlist.id.startsWith("PL") || playlist.id.startsWith("RD") -> "VL${playlist.id}"
+                else -> if (playlist.id.startsWith("VL")) playlist.id else "VL${playlist.id}"
+            }
             val payload = JSONObject().apply {
                 put("context", JSONObject().apply {
                     put("client", JSONObject().apply {
@@ -927,26 +971,65 @@ object SimpMusicExtractorEngine {
                     var bannerUrl = playlist.artworkUrl
                     var title = playlist.title
                     var authorAndMeta = playlist.author
+                    var totalViews = ""
 
-                    val headerRenderer = twoCol?.optJSONArray("tabs")?.optJSONObject(0)
+                    // 1. Extract header renderer (tabs[0] section 0)
+                    val tab0Contents = twoCol?.optJSONArray("tabs")?.optJSONObject(0)
                         ?.optJSONObject("tabRenderer")?.optJSONObject("content")
                         ?.optJSONObject("sectionListRenderer")?.optJSONArray("contents")
-                        ?.optJSONObject(0)?.optJSONObject("musicResponsiveHeaderRenderer")
+
+                    var headerRenderer: JSONObject? = null
+                    if (tab0Contents != null) {
+                        for (s in 0 until tab0Contents.length()) {
+                            val candidate = tab0Contents.optJSONObject(s)?.optJSONObject("musicResponsiveHeaderRenderer")
+                            if (candidate != null) {
+                                headerRenderer = candidate
+                                break
+                            }
+                        }
+                    }
 
                     if (headerRenderer != null) {
                         val titleRun = headerRenderer.optJSONObject("title")?.optJSONArray("runs")?.optJSONObject(0)?.optString("text")
                         if (!titleRun.isNullOrBlank()) title = titleRun
 
+                        val strapline = headerRenderer.optJSONObject("straplineTextOne")?.optJSONArray("runs")?.optJSONObject(0)?.optString("text")?.trim() ?: ""
+
+                        val metaParts = mutableListOf<String>()
+                        if (strapline.isNotEmpty()) {
+                            metaParts.add(strapline)
+                        }
+
+                        val subRuns = headerRenderer.optJSONObject("subtitle")?.optJSONArray("runs")
+                        if (subRuns != null) {
+                            for (s in 0 until subRuns.length()) {
+                                val t = subRuns.optJSONObject(s)?.optString("text")?.trim() ?: ""
+                                if (t.isNotEmpty() && t != "•") {
+                                    metaParts.add(t)
+                                    val pv = playCountRegex.find(t)?.value
+                                    if (!pv.isNullOrBlank() && totalViews.isBlank()) {
+                                        totalViews = pv
+                                    }
+                                }
+                            }
+                        }
+
                         val secondSub = headerRenderer.optJSONObject("secondSubtitle")?.optJSONArray("runs")
                         if (secondSub != null) {
-                            val texts = mutableListOf<String>()
                             for (s in 0 until secondSub.length()) {
                                 val t = secondSub.optJSONObject(s)?.optString("text")?.trim() ?: ""
-                                if (t.isNotEmpty() && t != "•") texts.add(t)
+                                if (t.isNotEmpty() && t != "•") {
+                                    metaParts.add(t)
+                                    val pv = playCountRegex.find(t)?.value
+                                    if (!pv.isNullOrBlank() && totalViews.isBlank()) {
+                                        totalViews = pv
+                                    }
+                                }
                             }
-                            if (texts.isNotEmpty()) {
-                                authorAndMeta = texts.joinToString(" • ")
-                            }
+                        }
+
+                        if (metaParts.isNotEmpty()) {
+                            authorAndMeta = metaParts.distinct().joinToString(" • ")
                         }
 
                         val thumbArr = headerRenderer.optJSONObject("thumbnail")
@@ -958,14 +1041,39 @@ object SimpMusicExtractorEngine {
                         }
                     }
 
-                    val playlistShelf = twoCol?.optJSONObject("secondaryContents")
+                    // 2. Find tracks shelf (either musicShelfRenderer or musicPlaylistShelfRenderer)
+                    var items: JSONArray? = null
+                    val secContents = twoCol?.optJSONObject("secondaryContents")
                         ?.optJSONObject("sectionListRenderer")
                         ?.optJSONArray("contents")
-                        ?.optJSONObject(0)
-                        ?.optJSONObject("musicPlaylistShelfRenderer")
 
-                    val items = playlistShelf?.optJSONArray("contents")
+                    if (secContents != null) {
+                        for (s in 0 until secContents.length()) {
+                            val sec = secContents.optJSONObject(s) ?: continue
+                            val shelf = sec.optJSONObject("musicShelfRenderer")
+                                ?: sec.optJSONObject("musicPlaylistShelfRenderer")
+                            if (shelf != null) {
+                                items = shelf.optJSONArray("contents")
+                                if (items != null && items.length() > 0) break
+                            }
+                        }
+                    }
+
+                    if (items == null && tab0Contents != null) {
+                        for (s in 0 until tab0Contents.length()) {
+                            val sec = tab0Contents.optJSONObject(s) ?: continue
+                            val shelf = sec.optJSONObject("musicShelfRenderer")
+                                ?: sec.optJSONObject("musicPlaylistShelfRenderer")
+                            if (shelf != null) {
+                                items = shelf.optJSONArray("contents")
+                                if (items != null && items.length() > 0) break
+                            }
+                        }
+                    }
+
                     val playlistTracks = mutableListOf<PlaylistTrackItem>()
+                    var sumPlaysMillion = 0.0
+                    var hasPlayCounts = false
 
                     if (items != null) {
                         for (i in 0 until items.length()) {
@@ -978,18 +1086,46 @@ object SimpMusicExtractorEngine {
                                 ?.optJSONObject(0)
                                 ?.optString("text") ?: continue
 
-                            val artistRuns = flexCols.optJSONObject(1)
-                                ?.optJSONObject("musicResponsiveListItemFlexColumnRenderer")
-                                ?.optJSONObject("text")
-                                ?.optJSONArray("runs")
-
-                            val artistBuilder = StringBuilder()
-                            if (artistRuns != null) {
-                                for (a in 0 until artistRuns.length()) {
-                                    artistBuilder.append(artistRuns.optJSONObject(a)?.optString("text") ?: "")
+                            // Artist name
+                            var artist = ""
+                            if (flexCols.length() > 1) {
+                                val artistRuns = flexCols.optJSONObject(1)
+                                    ?.optJSONObject("musicResponsiveListItemFlexColumnRenderer")
+                                    ?.optJSONObject("text")
+                                    ?.optJSONArray("runs")
+                                if (artistRuns != null) {
+                                    val parts = mutableListOf<String>()
+                                    for (a in 0 until artistRuns.length()) {
+                                        val t = artistRuns.optJSONObject(a)?.optString("text")?.trim() ?: ""
+                                        if (t.isNotEmpty() && t != "•") parts.add(t)
+                                    }
+                                    artist = parts.joinToString(" ")
                                 }
                             }
-                            val artist = artistBuilder.toString().ifBlank { "YouTube Music Artist" }
+                            if (artist.isBlank()) {
+                                artist = playlist.author.ifBlank { "Artist" }
+                            }
+
+                            // View count / play count per song
+                            var songViews = ""
+                            for (c in 1 until flexCols.length()) {
+                                val colRuns = flexCols.optJSONObject(c)
+                                    ?.optJSONObject("musicResponsiveListItemFlexColumnRenderer")
+                                    ?.optJSONObject("text")
+                                    ?.optJSONArray("runs")
+                                if (colRuns != null) {
+                                    for (r in 0 until colRuns.length()) {
+                                        val txt = colRuns.optJSONObject(r)?.optString("text")?.trim() ?: ""
+                                        val pv = playCountRegex.find(txt)?.value
+                                        if (!pv.isNullOrBlank()) {
+                                            songViews = pv
+                                            hasPlayCounts = true
+                                            break
+                                        }
+                                    }
+                                }
+                                if (songViews.isNotEmpty()) break
+                            }
 
                             val fixedCols = item.optJSONArray("fixedColumns")
                             val durationText = fixedCols?.optJSONObject(0)
@@ -999,10 +1135,33 @@ object SimpMusicExtractorEngine {
                                 ?.optJSONObject(0)
                                 ?.optString("text") ?: ""
 
-                            val vidId = item.optJSONObject("playlistItemData")?.optString("videoId")
-                                ?: item.optJSONObject("navigationEndpoint")
+                            // VideoId from multiple potential descriptors
+                            var vidId = item.optJSONObject("playlistItemData")?.optString("videoId") ?: ""
+                            if (vidId.isBlank()) {
+                                vidId = item.optJSONObject("overlay")
+                                    ?.optJSONObject("musicItemThumbnailOverlayRenderer")
+                                    ?.optJSONObject("content")
+                                    ?.optJSONObject("musicPlayButtonRenderer")
+                                    ?.optJSONObject("playNavigationEndpoint")
                                     ?.optJSONObject("watchEndpoint")
-                                    ?.optString("videoId") ?: continue
+                                    ?.optString("videoId") ?: ""
+                            }
+                            if (vidId.isBlank()) {
+                                vidId = item.optJSONObject("navigationEndpoint")
+                                    ?.optJSONObject("watchEndpoint")
+                                    ?.optString("videoId") ?: ""
+                            }
+                            if (vidId.isBlank()) {
+                                vidId = flexCols.optJSONObject(0)
+                                    ?.optJSONObject("musicResponsiveListItemFlexColumnRenderer")
+                                    ?.optJSONObject("text")
+                                    ?.optJSONArray("runs")
+                                    ?.optJSONObject(0)
+                                    ?.optJSONObject("navigationEndpoint")
+                                    ?.optJSONObject("watchEndpoint")
+                                    ?.optString("videoId") ?: ""
+                            }
+                            if (vidId.isBlank()) continue
 
                             val thumbArr = item.optJSONObject("thumbnail")
                                 ?.optJSONObject("musicThumbnailRenderer")
@@ -1010,6 +1169,30 @@ object SimpMusicExtractorEngine {
                                 ?.optJSONArray("thumbnails")
                             val thumb = thumbArr?.optJSONObject(thumbArr.length() - 1)?.optString("url")
                                 ?: "https://img.youtube.com/vi/$vidId/hqdefault.jpg"
+
+                            // Sum numeric plays
+                            if (songViews.isNotEmpty()) {
+                                val match = Regex("""([\d\.]+)\s*([KkMmBb])?""").find(songViews)
+                                if (match != null) {
+                                    val num = match.groupValues[1].toDoubleOrNull() ?: 0.0
+                                    val unit = match.groupValues.getOrNull(2)?.uppercase() ?: ""
+                                    val mult = when (unit) {
+                                        "K" -> 0.001
+                                        "M" -> 1.0
+                                        "B" -> 1000.0
+                                        else -> 0.000001
+                                    }
+                                    sumPlaysMillion += num * mult
+                                }
+                            }
+
+                            val finalTrackViews = if (songViews.isNotBlank()) {
+                                songViews
+                            } else if (durationText.isNotBlank()) {
+                                durationText
+                            } else {
+                                "Popular Track"
+                            }
 
                             playlistTracks.add(
                                 PlaylistTrackItem(
@@ -1023,9 +1206,17 @@ object SimpMusicExtractorEngine {
                                         durationSeconds = parseDurationText(durationText),
                                         artworkUrl = thumb
                                     ),
-                                    viewCount = durationText.ifBlank { "Popular track" }
+                                    viewCount = finalTrackViews
                                 )
                             )
+                        }
+                    }
+
+                    if (totalViews.isBlank() && hasPlayCounts && sumPlaysMillion > 0) {
+                        totalViews = when {
+                            sumPlaysMillion >= 1000.0 -> String.format(java.util.Locale.US, "%.1fB total plays", sumPlaysMillion / 1000.0)
+                            sumPlaysMillion >= 1.0 -> String.format(java.util.Locale.US, "%.1fM total plays", sumPlaysMillion)
+                            else -> "${(sumPlaysMillion * 1000).toInt()}K total plays"
                         }
                     }
 
@@ -1036,7 +1227,8 @@ object SimpMusicExtractorEngine {
                             author = authorAndMeta,
                             trackCount = "${playlistTracks.size} tracks",
                             bannerUrl = bannerUrl,
-                            tracks = playlistTracks
+                            tracks = playlistTracks,
+                            totalViews = totalViews
                         )
                     }
                 }
@@ -1053,15 +1245,20 @@ object SimpMusicExtractorEngine {
             trackCount = "${fallbackTracks.size} tracks",
             bannerUrl = playlist.artworkUrl,
             tracks = fallbackTracks.mapIndexed { idx, trk ->
-                PlaylistTrackItem(rank = idx + 1, track = trk, viewCount = "3:30")
-            }
+                PlaylistTrackItem(rank = idx + 1, track = trk, viewCount = "Popular Track")
+            },
+            totalViews = ""
         )
     }
 
     /**
-     * Fetches detailed artist profile with high-res banner and ranked 1-10 Top Songs with stream counts.
+     * Searches YouTube Music specifically for matching artist channels.
+     * Uses WEB_REMIX with artist filter params `EgWKAQIgAWoKEAkQChAFEAMQBA%3D%3D`.
+     * Inspects both `musicCardShelfRenderer` (top hero artist) and `musicShelfRenderer` / `itemSectionRenderer`.
      */
-    suspend fun fetchArtistDetail(artist: YtmTopArtist): ArtistDetail = withContext(Dispatchers.IO) {
+    suspend fun searchArtists(artistName: String): List<YtmTopArtist> = withContext(Dispatchers.IO) {
+        if (artistName.isBlank()) return@withContext emptyList()
+        val artists = mutableListOf<YtmTopArtist>()
         try {
             val payload = JSONObject().apply {
                 put("context", JSONObject().apply {
@@ -1072,11 +1269,12 @@ object SimpMusicExtractorEngine {
                         put("gl", "US")
                     })
                 })
-                put("browseId", artist.id)
+                put("query", artistName)
+                put("params", "EgWKAQIgAWoKEAkQChAFEAMQBA%3D%3D")
             }
 
             val req = Request.Builder()
-                .url("https://music.youtube.com/youtubei/v1/browse?prettyPrint=false")
+                .url("https://music.youtube.com/youtubei/v1/search?prettyPrint=false")
                 .header("User-Agent", USER_AGENT)
                 .header("Origin", "https://music.youtube.com")
                 .header("Referer", "https://music.youtube.com/")
@@ -1086,134 +1284,663 @@ object SimpMusicExtractorEngine {
             httpClient.newCall(req).execute().use { resp ->
                 if (resp.isSuccessful) {
                     val root = JSONObject(resp.body?.string() ?: "{}")
-                    val header = root.optJSONObject("header")?.optJSONObject("musicImmersiveHeaderRenderer")
-                    val bannerThumbnails = header?.optJSONObject("thumbnail")
-                        ?.optJSONObject("musicThumbnailRenderer")
-                        ?.optJSONObject("thumbnail")
-                        ?.optJSONArray("thumbnails")
-                    val bannerUrl = bannerThumbnails?.optJSONObject(bannerThumbnails.length() - 1)?.optString("url")
-                        ?: artist.avatarUrl
-
-                    val subsCount = header?.optJSONObject("subscriptionButton")
-                        ?.optJSONObject("subscribeButtonRenderer")
-                        ?.optJSONObject("subscriberCountText")
-                        ?.optJSONArray("runs")
-                        ?.optJSONObject(0)
-                        ?.optString("text")
-                        ?: artist.subscribers
-
-                    val contents = root.optJSONObject("contents")
-                        ?.optJSONObject("singleColumnBrowseResultsRenderer")
+                    val tabs = root.optJSONObject("contents")
+                        ?.optJSONObject("tabbedSearchResultsRenderer")
                         ?.optJSONArray("tabs")
-                        ?.optJSONObject(0)
-                        ?.optJSONObject("tabRenderer")
-                        ?.optJSONObject("content")
-                        ?.optJSONObject("sectionListRenderer")
-                        ?.optJSONArray("contents")
 
-                    val topSongs = mutableListOf<ArtistSong>()
-                    if (contents != null) {
-                        for (i in 0 until contents.length()) {
-                            val shelf = contents.optJSONObject(i)?.optJSONObject("musicShelfRenderer") ?: continue
-                            val shelfTitle = shelf.optJSONObject("title")
-                                ?.optJSONArray("runs")
-                                ?.optJSONObject(0)
-                                ?.optString("text") ?: ""
+                    if (tabs != null) {
+                        for (t in 0 until tabs.length()) {
+                            val sectionContents = tabs.optJSONObject(t)
+                                ?.optJSONObject("tabRenderer")
+                                ?.optJSONObject("content")
+                                ?.optJSONObject("sectionListRenderer")
+                                ?.optJSONArray("contents") ?: continue
 
-                            if (shelfTitle.contains("Top songs", ignoreCase = true) || shelfTitle.contains("Songs", ignoreCase = true)) {
-                                val songItems = shelf.optJSONArray("contents") ?: continue
-                                for (j in 0 until minOf(songItems.length(), 10)) {
-                                    val item = songItems.optJSONObject(j)?.optJSONObject("musicResponsiveListItemRenderer") ?: continue
-                                    val title = item.optJSONArray("flexColumns")
-                                        ?.optJSONObject(0)
-                                        ?.optJSONObject("musicResponsiveListItemFlexColumnRenderer")
-                                        ?.optJSONObject("text")
-                                        ?.optJSONArray("runs")
-                                        ?.optJSONObject(0)
-                                        ?.optString("text") ?: continue
+                            for (s in 0 until sectionContents.length()) {
+                                val secObj = sectionContents.optJSONObject(s) ?: continue
 
-                                    val flexCols = item.optJSONArray("flexColumns")
-                                    val album = flexCols?.optJSONObject(1)
-                                        ?.optJSONObject("musicResponsiveListItemFlexColumnRenderer")
-                                        ?.optJSONObject("text")
-                                        ?.optJSONArray("runs")
-                                        ?.optJSONObject(0)
-                                        ?.optString("text") ?: artist.name
+                                // 1. Check musicCardShelfRenderer (hero artist card)
+                                val card = secObj.optJSONObject("musicCardShelfRenderer")
+                                if (card != null) {
+                                    val browseId = card.optJSONObject("onTap")?.optJSONObject("browseEndpoint")?.optString("browseId")
+                                        ?: card.optJSONObject("title")?.optJSONArray("runs")?.optJSONObject(0)?.optJSONObject("navigationEndpoint")?.optJSONObject("browseEndpoint")?.optString("browseId")
+                                        ?: ""
+                                    val name = card.optJSONObject("title")?.optJSONArray("runs")?.optJSONObject(0)?.optString("text") ?: artistName
+                                    val subInfo = card.optJSONObject("subtitle")?.optJSONArray("runs")?.let { runs ->
+                                        (0 until runs.length()).joinToString("") { runs.optJSONObject(it)?.optString("text") ?: "" }
+                                    } ?: ""
+                                    val thumbArr = card.optJSONObject("thumbnail")?.optJSONObject("musicThumbnailRenderer")?.optJSONObject("thumbnail")?.optJSONArray("thumbnails")
+                                    val thumb = thumbArr?.optJSONObject(thumbArr.length() - 1)?.optString("url") ?: ""
+                                    if (browseId.isNotBlank()) {
+                                        artists.add(YtmTopArtist(id = browseId, name = name, subscribers = subInfo, avatarUrl = thumb))
+                                    }
+                                }
 
-                                    var playCount = ""
-                                    if (flexCols != null && flexCols.length() > 2) {
-                                        playCount = flexCols.optJSONObject(2)
+                                // 2. Check musicShelfRenderer or itemSectionRenderer
+                                val shelfItems = secObj.optJSONObject("musicShelfRenderer")?.optJSONArray("contents")
+                                    ?: secObj.optJSONObject("itemSectionRenderer")?.optJSONArray("contents")
+                                    ?: continue
+
+                                for (i in 0 until shelfItems.length()) {
+                                    val item = shelfItems.optJSONObject(i)
+                                        ?.optJSONObject("musicResponsiveListItemRenderer") ?: continue
+
+                                    val flexCols = item.optJSONArray("flexColumns") ?: continue
+                                    var browseId = item.optJSONObject("navigationEndpoint")
+                                        ?.optJSONObject("browseEndpoint")
+                                        ?.optString("browseId") ?: ""
+
+                                    if (browseId.isBlank() && flexCols.length() > 0) {
+                                        browseId = flexCols.optJSONObject(0)
                                             ?.optJSONObject("musicResponsiveListItemFlexColumnRenderer")
                                             ?.optJSONObject("text")
                                             ?.optJSONArray("runs")
                                             ?.optJSONObject(0)
-                                            ?.optString("text") ?: ""
+                                            ?.optJSONObject("navigationEndpoint")
+                                            ?.optJSONObject("browseEndpoint")
+                                            ?.optString("browseId") ?: ""
                                     }
 
-                                    val vidId = item.optJSONObject("playlistItemData")?.optString("videoId")
-                                        ?: item.optJSONObject("navigationEndpoint")
-                                            ?.optJSONObject("watchEndpoint")
-                                            ?.optString("videoId") ?: continue
+                                    if (browseId.isBlank()) continue
+
+                                    val name = flexCols.optJSONObject(0)
+                                        ?.optJSONObject("musicResponsiveListItemFlexColumnRenderer")
+                                        ?.optJSONObject("text")
+                                        ?.optJSONArray("runs")
+                                        ?.optJSONObject(0)
+                                        ?.optString("text") ?: artistName
+
+                                    var subInfo = ""
+                                    if (flexCols.length() > 1) {
+                                        val runs = flexCols.optJSONObject(1)
+                                            ?.optJSONObject("musicResponsiveListItemFlexColumnRenderer")
+                                            ?.optJSONObject("text")
+                                            ?.optJSONArray("runs")
+                                        if (runs != null) {
+                                            subInfo = (0 until runs.length()).joinToString("") { runs.optJSONObject(it)?.optString("text") ?: "" }
+                                        }
+                                    }
 
                                     val thumbArr = item.optJSONObject("thumbnail")
                                         ?.optJSONObject("musicThumbnailRenderer")
                                         ?.optJSONObject("thumbnail")
                                         ?.optJSONArray("thumbnails")
-                                    val thumb = thumbArr?.optJSONObject(thumbArr.length() - 1)?.optString("url")
-                                        ?: "https://img.youtube.com/vi/$vidId/hqdefault.jpg"
+                                    val thumb = thumbArr?.optJSONObject(thumbArr.length() - 1)?.optString("url") ?: ""
 
-                                    topSongs.add(
-                                        ArtistSong(
-                                            rank = j + 1,
-                                            track = AuraTrack(
-                                                id = "yt_$vidId",
-                                                videoId = vidId,
-                                                title = title,
-                                                artist = artist.name,
-                                                album = album,
-                                                durationSeconds = 210,
-                                                artworkUrl = thumb
-                                            ),
-                                            playCount = playCount
+                                    artists.add(
+                                        YtmTopArtist(
+                                            id = browseId,
+                                            name = name,
+                                            subscribers = subInfo,
+                                            avatarUrl = thumb
                                         )
                                     )
                                 }
-                                break
                             }
                         }
-                    }
-
-                    if (topSongs.isNotEmpty()) {
-                        return@withContext ArtistDetail(
-                            id = artist.id,
-                            name = artist.name,
-                            subscribers = subsCount,
-                            bannerUrl = bannerUrl,
-                            topSongs = topSongs
-                        )
                     }
                 }
             }
         } catch (e: Exception) {
-            Log.w(TAG, "Error fetching artist channel browse: ${e.message}")
+            Log.w(TAG, "Search artists error: ${e.message}")
+        }
+        artists.distinctBy { it.id }.sortedWith(
+            compareByDescending<YtmTopArtist> { it.name == artistName }
+                .thenByDescending { it.name.equals(artistName, ignoreCase = true) }
+        )
+    }
+
+    suspend fun searchArtist(artistName: String): YtmTopArtist? = searchArtists(artistName).firstOrNull()
+
+    /**
+     * Fetches detailed artist profile with high-res banner, up to 30 Top Songs with real play counts,
+     * and all carousels (Albums, Singles & EPs, Videos, Live performances, Featured on, Playlists, Fans might also like).
+     */
+    suspend fun fetchArtistDetail(artist: YtmTopArtist): ArtistDetail = withContext(Dispatchers.IO) {
+        var browseId = artist.id
+        var bannerUrl = artist.avatarUrl
+        var subsCount = artist.subscribers
+
+        if (browseId.isBlank()) {
+            val resolved = searchArtist(artist.name)
+            if (resolved != null && resolved.id.isNotBlank()) {
+                browseId = resolved.id
+                if (bannerUrl.isBlank()) bannerUrl = resolved.avatarUrl
+                if (subsCount.isBlank()) subsCount = resolved.subscribers
+            }
         }
 
-        // Search fallback
-        val searched = searchYouTubeMusic("${artist.name} official songs", "songs").take(10)
-        val fallbackSongs = searched.mapIndexed { idx, track ->
-            ArtistSong(
-                rank = idx + 1,
-                track = track,
-                playCount = "Popular stream"
-            )
+        val topSongs = mutableListOf<ArtistSong>()
+        val albums = mutableListOf<com.auramusic.app.domain.model.ArtistAlbum>()
+        val carousels = mutableListOf<com.auramusic.app.domain.model.ArtistCarousel>()
+
+        if (browseId.isNotBlank()) {
+            try {
+                val payload = JSONObject().apply {
+                    put("context", JSONObject().apply {
+                        put("client", JSONObject().apply {
+                            put("clientName", "WEB_REMIX")
+                            put("clientVersion", "1.20250312.01.00")
+                            put("hl", "en")
+                            put("gl", "US")
+                        })
+                    })
+                    put("browseId", browseId)
+                }
+
+                val req = Request.Builder()
+                    .url("https://music.youtube.com/youtubei/v1/browse?prettyPrint=false")
+                    .header("User-Agent", USER_AGENT)
+                    .header("Origin", "https://music.youtube.com")
+                    .header("Referer", "https://music.youtube.com/")
+                    .post(payload.toString().toRequestBody("application/json".toMediaType()))
+                    .build()
+
+                httpClient.newCall(req).execute().use { resp ->
+                    if (resp.isSuccessful) {
+                        val root = JSONObject(resp.body?.string() ?: "{}")
+                        val header = root.optJSONObject("header")?.optJSONObject("musicImmersiveHeaderRenderer")
+                            ?: root.optJSONObject("header")?.optJSONObject("musicVisualHeaderRenderer")
+                            ?: root.optJSONObject("header")?.optJSONObject("musicHeaderRenderer")
+
+                        val bannerThumbnails = header?.optJSONObject("thumbnail")
+                            ?.optJSONObject("musicThumbnailRenderer")
+                            ?.optJSONObject("thumbnail")
+                            ?.optJSONArray("thumbnails")
+                            ?: header?.optJSONObject("foregroundThumbnail")
+                                ?.optJSONObject("musicThumbnailRenderer")
+                                ?.optJSONObject("thumbnail")
+                                ?.optJSONArray("thumbnails")
+
+                        if (bannerThumbnails != null && bannerThumbnails.length() > 0) {
+                            bannerUrl = bannerThumbnails.optJSONObject(bannerThumbnails.length() - 1)?.optString("url") ?: bannerUrl
+                        }
+
+                        val parsedSubs = header?.optJSONObject("subscriptionButton")
+                            ?.optJSONObject("subscribeButtonRenderer")
+                            ?.optJSONObject("subscriberCountText")
+                            ?.optJSONArray("runs")
+                            ?.optJSONObject(0)
+                            ?.optString("text")
+                            ?: header?.optJSONObject("subscriberCountText")
+                                ?.optJSONArray("runs")
+                                ?.optJSONObject(0)
+                                ?.optString("text")
+
+                        if (!parsedSubs.isNullOrBlank()) {
+                            val clean = parsedSubs.trim()
+                            subsCount = if (clean.contains("sub", ignoreCase = true) || clean.contains("audience", ignoreCase = true)) {
+                                clean
+                            } else {
+                                "$clean subscribers"
+                            }
+                        }
+
+                        val contents = root.optJSONObject("contents")
+                            ?.optJSONObject("singleColumnBrowseResultsRenderer")
+                            ?.optJSONArray("tabs")
+                            ?.optJSONObject(0)
+                            ?.optJSONObject("tabRenderer")
+                            ?.optJSONObject("content")
+                            ?.optJSONObject("sectionListRenderer")
+                            ?.optJSONArray("contents")
+
+                        if (contents != null) {
+                            for (i in 0 until contents.length()) {
+                                val shelfObj = contents.optJSONObject(i) ?: continue
+
+                                // 1. Top Songs shelf
+                                val shelf = shelfObj.optJSONObject("musicShelfRenderer")
+                                if (shelf != null) {
+                                    val shelfTitle = shelf.optJSONObject("title")
+                                        ?.optJSONArray("runs")
+                                        ?.optJSONObject(0)
+                                        ?.optString("text") ?: ""
+
+                                    if (shelfTitle.contains("Top songs", ignoreCase = true) || shelfTitle.contains("Songs", ignoreCase = true)) {
+                                        // Check if a full Top Songs playlist endpoint is available (e.g. VLOL...)
+                                        val moreBrowseId = shelf.optJSONObject("bottomEndpoint")
+                                            ?.optJSONObject("browseEndpoint")
+                                            ?.optString("browseId")
+                                            ?: shelf.optJSONObject("title")
+                                                ?.optJSONArray("runs")
+                                                ?.optJSONObject(0)
+                                                ?.optJSONObject("navigationEndpoint")
+                                                ?.optJSONObject("browseEndpoint")
+                                                ?.optString("browseId") ?: ""
+                                        val moreParams = shelf.optJSONObject("bottomEndpoint")
+                                            ?.optJSONObject("browseEndpoint")
+                                            ?.optString("params")
+                                            ?: shelf.optJSONObject("title")
+                                                ?.optJSONArray("runs")
+                                                ?.optJSONObject(0)
+                                                ?.optJSONObject("navigationEndpoint")
+                                                ?.optJSONObject("browseEndpoint")
+                                                ?.optString("params") ?: ""
+
+                                        if (moreBrowseId.isNotBlank()) {
+                                            try {
+                                                val plPayload = JSONObject().apply {
+                                                    put("context", JSONObject().apply {
+                                                        put("client", JSONObject().apply {
+                                                            put("clientName", "WEB_REMIX")
+                                                            put("clientVersion", "1.20250312.01.00")
+                                                            put("hl", "en")
+                                                            put("gl", "US")
+                                                        })
+                                                    })
+                                                    put("browseId", moreBrowseId)
+                                                    if (moreParams.isNotBlank()) put("params", moreParams)
+                                                }
+                                                val plReq = Request.Builder()
+                                                    .url("https://music.youtube.com/youtubei/v1/browse?prettyPrint=false")
+                                                    .header("User-Agent", USER_AGENT)
+                                                    .header("Origin", "https://music.youtube.com")
+                                                    .header("Referer", "https://music.youtube.com/")
+                                                    .post(plPayload.toString().toRequestBody("application/json".toMediaType()))
+                                                    .build()
+
+                                                httpClient.newCall(plReq).execute().use { plResp ->
+                                                    if (plResp.isSuccessful) {
+                                                        val plRoot = JSONObject(plResp.body?.string() ?: "{}")
+                                                        val plContents = plRoot.optJSONObject("contents")
+                                                            ?.optJSONObject("singleColumnBrowseResultsRenderer")
+                                                            ?.optJSONArray("tabs")
+                                                            ?.optJSONObject(0)
+                                                            ?.optJSONObject("tabRenderer")
+                                                            ?.optJSONObject("content")
+                                                            ?.optJSONObject("sectionListRenderer")
+                                                            ?.optJSONArray("contents")
+                                                            ?.optJSONObject(0)
+                                                            ?.optJSONObject("musicPlaylistShelfRenderer")
+                                                            ?.optJSONArray("contents")
+
+                                                        if (plContents != null && plContents.length() > 0) {
+                                                            for (j in 0 until minOf(plContents.length(), 30)) {
+                                                                val item = plContents.optJSONObject(j)?.optJSONObject("musicResponsiveListItemRenderer") ?: continue
+                                                                val flexCols = item.optJSONArray("flexColumns") ?: continue
+                                                                val title = flexCols.optJSONObject(0)
+                                                                    ?.optJSONObject("musicResponsiveListItemFlexColumnRenderer")
+                                                                    ?.optJSONObject("text")
+                                                                    ?.optJSONArray("runs")
+                                                                    ?.optJSONObject(0)
+                                                                    ?.optString("text") ?: continue
+
+                                                                val album = if (flexCols.length() > 3) {
+                                                                    flexCols.optJSONObject(3)?.optJSONObject("musicResponsiveListItemFlexColumnRenderer")
+                                                                        ?.optJSONObject("text")?.optJSONArray("runs")?.optJSONObject(0)?.optString("text") ?: artist.name
+                                                                } else artist.name
+
+                                                                var playCount = ""
+                                                                if (flexCols.length() > 2) {
+                                                                    playCount = flexCols.optJSONObject(2)
+                                                                        ?.optJSONObject("musicResponsiveListItemFlexColumnRenderer")
+                                                                        ?.optJSONObject("text")
+                                                                        ?.optJSONArray("runs")
+                                                                        ?.optJSONObject(0)
+                                                                        ?.optString("text") ?: ""
+                                                                }
+
+                                                                val vidId = item.optJSONObject("playlistItemData")?.optString("videoId")
+                                                                    ?: item.optJSONObject("navigationEndpoint")
+                                                                        ?.optJSONObject("watchEndpoint")
+                                                                        ?.optString("videoId") ?: continue
+
+                                                                val thumbArr = item.optJSONObject("thumbnail")
+                                                                    ?.optJSONObject("musicThumbnailRenderer")
+                                                                    ?.optJSONObject("thumbnail")
+                                                                    ?.optJSONArray("thumbnails")
+                                                                val thumb = thumbArr?.optJSONObject(thumbArr.length() - 1)?.optString("url")
+                                                                    ?: "https://img.youtube.com/vi/$vidId/hqdefault.jpg"
+
+                                                                topSongs.add(
+                                                                    ArtistSong(
+                                                                        rank = topSongs.size + 1,
+                                                                        track = AuraTrack(
+                                                                            id = "yt_$vidId",
+                                                                            videoId = vidId,
+                                                                            title = title,
+                                                                            artist = artist.name,
+                                                                            album = album,
+                                                                            durationSeconds = 210,
+                                                                            artworkUrl = thumb
+                                                                        ),
+                                                                        playCount = playCount
+                                                                    )
+                                                                )
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            } catch (e: Exception) {
+                                                Log.d(TAG, "Error fetching full top songs playlist: ${e.message}")
+                                            }
+                                        }
+
+                                        // Fallback to the main page top songs shelf items if full playlist was not parsed
+                                        if (topSongs.isEmpty()) {
+                                            val songItems = shelf.optJSONArray("contents")
+                                            if (songItems != null) {
+                                                for (j in 0 until minOf(songItems.length(), 20)) {
+                                                    val item = songItems.optJSONObject(j)?.optJSONObject("musicResponsiveListItemRenderer") ?: continue
+                                                    val flexCols = item.optJSONArray("flexColumns") ?: continue
+                                                    val title = flexCols.optJSONObject(0)
+                                                        ?.optJSONObject("musicResponsiveListItemFlexColumnRenderer")
+                                                        ?.optJSONObject("text")
+                                                        ?.optJSONArray("runs")
+                                                        ?.optJSONObject(0)
+                                                        ?.optString("text") ?: continue
+
+                                                    val album = flexCols.optJSONObject(1)
+                                                        ?.optJSONObject("musicResponsiveListItemFlexColumnRenderer")
+                                                        ?.optJSONObject("text")
+                                                        ?.optJSONArray("runs")
+                                                        ?.optJSONObject(0)
+                                                        ?.optString("text") ?: artist.name
+
+                                                    var playCount = ""
+                                                    if (flexCols.length() > 2) {
+                                                        playCount = flexCols.optJSONObject(2)
+                                                            ?.optJSONObject("musicResponsiveListItemFlexColumnRenderer")
+                                                            ?.optJSONObject("text")
+                                                            ?.optJSONArray("runs")
+                                                            ?.optJSONObject(0)
+                                                            ?.optString("text") ?: ""
+                                                    }
+
+                                                    val vidId = item.optJSONObject("playlistItemData")?.optString("videoId")
+                                                        ?: item.optJSONObject("navigationEndpoint")
+                                                            ?.optJSONObject("watchEndpoint")
+                                                            ?.optString("videoId") ?: continue
+
+                                                    val thumbArr = item.optJSONObject("thumbnail")
+                                                        ?.optJSONObject("musicThumbnailRenderer")
+                                                        ?.optJSONObject("thumbnail")
+                                                        ?.optJSONArray("thumbnails")
+                                                    val thumb = thumbArr?.optJSONObject(thumbArr.length() - 1)?.optString("url")
+                                                        ?: "https://img.youtube.com/vi/$vidId/hqdefault.jpg"
+
+                                                    topSongs.add(
+                                                        ArtistSong(
+                                                            rank = topSongs.size + 1,
+                                                            track = AuraTrack(
+                                                                id = "yt_$vidId",
+                                                                videoId = vidId,
+                                                                title = title,
+                                                                artist = artist.name,
+                                                                album = album,
+                                                                durationSeconds = 210,
+                                                                artworkUrl = thumb
+                                                            ),
+                                                            playCount = playCount
+                                                        )
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // 2. Parse All Carousel Shelves (Albums, Singles & EPs, Videos, Live performances, Featured on, Playlists, Fans might also like)
+                                val carousel = shelfObj.optJSONObject("musicCarouselShelfRenderer")
+                                if (carousel != null) {
+                                    val headerTitle = carousel.optJSONObject("header")
+                                        ?.optJSONObject("musicCarouselShelfBasicHeaderRenderer")
+                                        ?.optJSONObject("title")
+                                        ?.optJSONArray("runs")
+                                        ?.optJSONObject(0)
+                                        ?.optString("text") ?: ""
+
+                                    val carouselItems = mutableListOf<com.auramusic.app.domain.model.ArtistCarouselItem>()
+                                    val contentsArr = carousel.optJSONArray("contents")
+                                    if (contentsArr != null && headerTitle.isNotBlank()) {
+                                        for (k in 0 until minOf(contentsArr.length(), 15)) {
+                                            val twoRow = contentsArr.optJSONObject(k)?.optJSONObject("musicTwoRowItemRenderer") ?: continue
+                                            val itemTitle = twoRow.optJSONObject("title")
+                                                ?.optJSONArray("runs")
+                                                ?.optJSONObject(0)
+                                                ?.optString("text") ?: continue
+
+                                            val subRuns = twoRow.optJSONObject("subtitle")?.optJSONArray("runs")
+                                            val subtitle = subRuns?.let { runs ->
+                                                val parts = mutableListOf<String>()
+                                                for (r in 0 until runs.length()) {
+                                                    val txt = runs.optJSONObject(r)?.optString("text")?.trim() ?: ""
+                                                    if (txt.isNotEmpty() && txt != "•") parts.add(txt)
+                                                }
+                                                parts.joinToString(" • ")
+                                            } ?: ""
+
+                                            val nav = twoRow.optJSONObject("navigationEndpoint")
+                                            val vid = nav?.optJSONObject("watchEndpoint")?.optString("videoId") ?: ""
+                                            val bid = nav?.optJSONObject("browseEndpoint")?.optString("browseId") ?: ""
+                                            val pageType = nav?.optJSONObject("browseEndpoint")
+                                                ?.optJSONObject("browseEndpointContextSupportedConfigs")
+                                                ?.optJSONObject("browseEndpointContextMusicConfig")
+                                                ?.optString("pageType") ?: ""
+
+                                            val endpointType = when {
+                                                vid.isNotBlank() -> "video"
+                                                pageType == "MUSIC_PAGE_TYPE_ARTIST" -> "artist"
+                                                pageType == "MUSIC_PAGE_TYPE_PLAYLIST" -> "playlist"
+                                                else -> "album"
+                                            }
+
+                                            val thumbArr = twoRow.optJSONObject("thumbnailRenderer")
+                                                ?.optJSONObject("musicThumbnailRenderer")
+                                                ?.optJSONObject("thumbnail")
+                                                ?.optJSONArray("thumbnails")
+                                            val thumb = thumbArr?.optJSONObject(thumbArr.length() - 1)?.optString("url") ?: ""
+
+                                            val itemId = if (vid.isNotBlank()) vid else if (bid.isNotBlank()) bid else "item_${carouselItems.size}"
+
+                                            carouselItems.add(
+                                                com.auramusic.app.domain.model.ArtistCarouselItem(
+                                                    id = itemId,
+                                                    title = itemTitle,
+                                                    subtitle = subtitle,
+                                                    artworkUrl = thumb,
+                                                    endpointType = endpointType,
+                                                    videoId = vid,
+                                                    browseId = bid
+                                                )
+                                            )
+
+                                            // Also maintain backwards compatibility for albums list
+                                            if (headerTitle.contains("Albums", ignoreCase = true) ||
+                                                headerTitle.contains("Singles", ignoreCase = true) ||
+                                                headerTitle.contains("EPs", ignoreCase = true)
+                                            ) {
+                                                albums.add(
+                                                    com.auramusic.app.domain.model.ArtistAlbum(
+                                                        id = itemId,
+                                                        title = itemTitle,
+                                                        year = subtitle.ifBlank { if (headerTitle.contains("Single", ignoreCase = true)) "Single" else "Album" },
+                                                        artworkUrl = thumb,
+                                                        type = if (headerTitle.contains("Single", ignoreCase = true)) "Single" else "Album"
+                                                    )
+                                                )
+                                            }
+                                        }
+
+                                        if (carouselItems.isNotEmpty()) {
+                                            carousels.add(
+                                                com.auramusic.app.domain.model.ArtistCarousel(
+                                                    title = headerTitle,
+                                                    items = carouselItems
+                                                )
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Error fetching artist channel browse: ${e.message}")
+            }
         }
+
+        // Fallbacks if browse didn't return top songs
+        if (topSongs.isEmpty()) {
+            val searched = searchYouTubeMusic("${artist.name} official songs", "songs").take(25)
+            searched.forEachIndexed { idx, track ->
+                topSongs.add(
+                    ArtistSong(
+                        rank = idx + 1,
+                        track = track,
+                        playCount = ""
+                    )
+                )
+            }
+        }
+
+        // Fallbacks if albums are empty
+        if (albums.isEmpty()) {
+            try {
+                val albumSearch = searchYouTubeMusic("${artist.name} album official", "albums").ifEmpty {
+                    searchYouTubeMusic("${artist.name} discography", "songs")
+                }
+                albumSearch.take(8).forEachIndexed { idx, trk ->
+                    val alb = com.auramusic.app.domain.model.ArtistAlbum(
+                        id = trk.videoId,
+                        title = trk.album.ifBlank { trk.title },
+                        year = "Album",
+                        artworkUrl = trk.artworkUrl,
+                        type = "Album"
+                    )
+                    albums.add(alb)
+                }
+            } catch (e: Exception) {
+                Log.d(TAG, "Fallback albums search error: ${e.message}")
+            }
+        }
+
         ArtistDetail(
-            id = artist.id,
+            id = browseId.ifBlank { artist.id },
             name = artist.name,
-            subscribers = artist.subscribers,
-            bannerUrl = artist.avatarUrl,
-            topSongs = fallbackSongs
+            subscribers = subsCount,
+            bannerUrl = bannerUrl,
+            topSongs = topSongs,
+            albums = albums,
+            carousels = carousels
         )
+    }
+
+    /**
+     * Resolves artist profile directly by artist name string, disambiguating with songTitle context if available.
+     */
+    suspend fun fetchArtistByName(
+        artistName: String,
+        songTitle: String = "",
+        fallbackArtwork: String = ""
+    ): ArtistDetail = withContext(Dispatchers.IO) {
+        var resolvedBrowseId: String? = null
+        if (songTitle.isNotBlank()) {
+            resolvedBrowseId = resolveArtistBrowseId(artistName, songTitle)
+        }
+
+        val resolved = if (!resolvedBrowseId.isNullOrBlank()) {
+            YtmTopArtist(
+                id = resolvedBrowseId,
+                name = artistName,
+                subscribers = "",
+                avatarUrl = fallbackArtwork
+            )
+        } else {
+            searchArtist(artistName)
+        }
+
+        val targetArtist = resolved ?: YtmTopArtist(
+            id = "",
+            name = artistName,
+            subscribers = "",
+            avatarUrl = fallbackArtwork
+        )
+        fetchArtistDetail(targetArtist)
+    }
+
+    /**
+     * Disambiguates an artist channel by querying "$artistName $songTitle" on InnerTube.
+     * Prevents collisions between artists sharing the same name (e.g. Japanese "LiSA" vs K-pop "LISA", Japanese "Eve" vs US rapper "Eve").
+     */
+    suspend fun resolveArtistBrowseId(artistName: String, songTitle: String): String? = withContext(Dispatchers.IO) {
+        if (artistName.isBlank() || songTitle.isBlank()) return@withContext null
+        try {
+            val payload = JSONObject().apply {
+                put("context", JSONObject().apply {
+                    put("client", JSONObject().apply {
+                        put("clientName", "WEB_REMIX")
+                        put("clientVersion", "1.20250312.01.00")
+                        put("hl", "en")
+                        put("gl", "US")
+                    })
+                })
+                put("query", "$artistName $songTitle")
+            }
+
+            val req = Request.Builder()
+                .url("https://music.youtube.com/youtubei/v1/search?prettyPrint=false")
+                .header("User-Agent", USER_AGENT)
+                .header("Origin", "https://music.youtube.com")
+                .header("Referer", "https://music.youtube.com/")
+                .post(payload.toString().toRequestBody("application/json".toMediaType()))
+                .build()
+
+            httpClient.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) return@withContext null
+                val root = JSONObject(resp.body?.string() ?: "{}")
+                val tabs = root.optJSONObject("contents")
+                    ?.optJSONObject("tabbedSearchResultsRenderer")
+                    ?.optJSONArray("tabs") ?: return@withContext null
+
+                for (t in 0 until tabs.length()) {
+                    val sec = tabs.optJSONObject(t)
+                        ?.optJSONObject("tabRenderer")
+                        ?.optJSONObject("content")
+                        ?.optJSONObject("sectionListRenderer")
+                        ?.optJSONArray("contents") ?: continue
+
+                    for (s in 0 until sec.length()) {
+                        val secObj = sec.optJSONObject(s) ?: continue
+                        val shelfItems = secObj.optJSONObject("musicShelfRenderer")?.optJSONArray("contents")
+                            ?: secObj.optJSONObject("itemSectionRenderer")?.optJSONArray("contents")
+                            ?: continue
+
+                        for (i in 0 until shelfItems.length()) {
+                            val r = shelfItems.optJSONObject(i)?.optJSONObject("musicResponsiveListItemRenderer") ?: continue
+                            val flex = r.optJSONArray("flexColumns") ?: continue
+                            if (flex.length() > 1) {
+                                val runs = flex.optJSONObject(1)
+                                    ?.optJSONObject("musicResponsiveListItemFlexColumnRenderer")
+                                    ?.optJSONObject("text")
+                                    ?.optJSONArray("runs") ?: continue
+
+                                for (ri in 0 until runs.length()) {
+                                    val run = runs.optJSONObject(ri) ?: continue
+                                    val runText = run.optString("text").trim()
+                                    val nav = run.optJSONObject("navigationEndpoint")?.optJSONObject("browseEndpoint")
+                                    val pageType = nav?.optJSONObject("browseEndpointContextSupportedConfigs")
+                                        ?.optJSONObject("browseEndpointContextMusicConfig")
+                                        ?.optString("pageType") ?: ""
+                                    val bId = nav?.optString("browseId") ?: ""
+
+                                    if ((pageType == "MUSIC_PAGE_TYPE_ARTIST" || bId.startsWith("UC")) && bId.isNotBlank()) {
+                                        if (runText.equals(artistName.trim(), ignoreCase = true)) {
+                                            return@withContext bId
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Resolve artist browseId error: ${e.message}")
+        }
+        null
     }
 
     /**
@@ -1352,15 +2079,24 @@ object SimpMusicExtractorEngine {
                 ?.optJSONArray("contents") ?: continue
 
             for (s in 0 until sectionContents.length()) {
-                val shelfItems = sectionContents.optJSONObject(s)
-                    ?.optJSONObject("musicShelfRenderer")
-                    ?.optJSONArray("contents") ?: continue
+                val secObj = sectionContents.optJSONObject(s) ?: continue
+                val shelfItems = secObj.optJSONObject("musicShelfRenderer")?.optJSONArray("contents")
+                    ?: secObj.optJSONObject("itemSectionRenderer")?.optJSONArray("contents")
+                    ?: secObj.optJSONObject("musicCardShelfRenderer")?.optJSONArray("contents")
+                    ?: continue
 
                 for (i in 0 until shelfItems.length()) {
                     val item = shelfItems.optJSONObject(i)
                         ?.optJSONObject("musicResponsiveListItemRenderer") ?: continue
 
-                    val videoId = item.optJSONObject("playlistItemData")?.optString("videoId")
+                    val flexColumns = item.optJSONArray("flexColumns") ?: continue
+                    val firstRun = flexColumns.optJSONObject(0)
+                        ?.optJSONObject("musicResponsiveListItemFlexColumnRenderer")
+                        ?.optJSONObject("text")
+                        ?.optJSONArray("runs")
+                        ?.optJSONObject(0)
+
+                    val videoId = item.optJSONObject("playlistItemData")?.optString("videoId")?.takeIf { it.isNotBlank() }
                         ?: item.optJSONObject("overlay")
                             ?.optJSONObject("musicItemThumbnailOverlayRenderer")
                             ?.optJSONObject("content")
@@ -1368,17 +2104,18 @@ object SimpMusicExtractorEngine {
                             ?.optJSONObject("playNavigationEndpoint")
                             ?.optJSONObject("watchEndpoint")
                             ?.optString("videoId")
+                            ?.takeIf { it.isNotBlank() }
+                        ?: item.optJSONObject("navigationEndpoint")
+                            ?.optJSONObject("watchEndpoint")
+                            ?.optString("videoId")
+                            ?.takeIf { it.isNotBlank() }
+                        ?: firstRun?.optJSONObject("navigationEndpoint")
+                            ?.optJSONObject("watchEndpoint")
+                            ?.optString("videoId")
+                            ?.takeIf { it.isNotBlank() }
                         ?: continue
 
-                    if (videoId.isBlank()) continue
-
-                    val flexColumns = item.optJSONArray("flexColumns") ?: continue
-                    val title = flexColumns.optJSONObject(0)
-                        ?.optJSONObject("musicResponsiveListItemFlexColumnRenderer")
-                        ?.optJSONObject("text")
-                        ?.optJSONArray("runs")
-                        ?.optJSONObject(0)
-                        ?.optString("text") ?: continue
+                    val title = firstRun?.optString("text") ?: continue
 
                     val subtitleRuns = flexColumns.optJSONObject(1)
                         ?.optJSONObject("musicResponsiveListItemFlexColumnRenderer")
@@ -1452,7 +2189,7 @@ object SimpMusicExtractorEngine {
             artist = "Chase Atlantic",
             album = "BEAUTY IN DEATH (Deluxe Edition)",
             durationSeconds = 256,
-            artworkUrl = "https://img.youtube.com/vi/4tijiFGhBN8/hqdefault.jpg",
+            artworkUrl = "https://i.ytimg.com/vi/4tijiFGhBN8/hq720.jpg",
             genre = "Alt R&B",
             hasLyricsBadge = true
         ),
@@ -1463,7 +2200,7 @@ object SimpMusicExtractorEngine {
             artist = "The Weeknd",
             album = "After Hours",
             durationSeconds = 200,
-            artworkUrl = "https://img.youtube.com/vi/4NRXx6U8ABQ/hqdefault.jpg",
+            artworkUrl = "https://i.ytimg.com/vi/4NRXx6U8ABQ/hq720.jpg",
             genre = "Synthwave",
             hasLyricsBadge = true
         ),
@@ -1474,7 +2211,7 @@ object SimpMusicExtractorEngine {
             artist = "Billie Eilish",
             album = "HIT ME HARD AND SOFT",
             durationSeconds = 196,
-            artworkUrl = "https://img.youtube.com/vi/d5gf9dXbPi0/hqdefault.jpg",
+            artworkUrl = "https://i.ytimg.com/vi/d5gf9dXbPi0/hq720.jpg",
             genre = "Alt Pop",
             isExplicit = true
         ),
@@ -1485,7 +2222,7 @@ object SimpMusicExtractorEngine {
             artist = "Travis Scott",
             album = "UTOPIA",
             durationSeconds = 191,
-            artworkUrl = "https://img.youtube.com/vi/B9synWjqBn8/hqdefault.jpg",
+            artworkUrl = "https://i.ytimg.com/vi/B9synWjqBn8/hq720.jpg",
             genre = "Hip Hop",
             isExplicit = true
         ),
@@ -1496,7 +2233,7 @@ object SimpMusicExtractorEngine {
             artist = "Arctic Monkeys",
             album = "Favourite Worst Nightmare",
             durationSeconds = 253,
-            artworkUrl = "https://img.youtube.com/vi/qU9mHegkTc4/hqdefault.jpg",
+            artworkUrl = "https://i.ytimg.com/vi/qU9mHegkTc4/hq720.jpg",
             genre = "Indie Rock",
             hasLyricsBadge = true
         ),
@@ -1507,7 +2244,7 @@ object SimpMusicExtractorEngine {
             artist = "The Weeknd ft. Daft Punk",
             album = "Starboy",
             durationSeconds = 230,
-            artworkUrl = "https://img.youtube.com/vi/34Na4j8AVgA/hqdefault.jpg",
+            artworkUrl = "https://i.ytimg.com/vi/34Na4j8AVgA/hq720.jpg",
             genre = "R&B / Pop",
             isExplicit = true
         ),
@@ -1518,7 +2255,7 @@ object SimpMusicExtractorEngine {
             artist = "SZA",
             album = "SOS",
             durationSeconds = 201,
-            artworkUrl = "https://img.youtube.com/vi/Sv5yCzPCkv8/hqdefault.jpg",
+            artworkUrl = "https://i.ytimg.com/vi/Sv5yCzPCkv8/hq720.jpg",
             genre = "R&B",
             hasLyricsBadge = true
         ),
@@ -1529,7 +2266,7 @@ object SimpMusicExtractorEngine {
             artist = "Post Malone",
             album = "AUSTIN",
             durationSeconds = 184,
-            artworkUrl = "https://img.youtube.com/vi/4D4bB6n0qI4/hqdefault.jpg",
+            artworkUrl = "https://i.ytimg.com/vi/4D4bB6n0qI4/hq720.jpg",
             genre = "Pop",
             hasLyricsBadge = true
         )

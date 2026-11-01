@@ -47,3 +47,8 @@ captures/
 # OS specific files
 .DS_Store
 Thumbs.db
+
+# Credentials
+.env/
+.env*
+*google-services.json

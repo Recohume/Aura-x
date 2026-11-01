@@ -10,13 +10,25 @@ import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.core.view.WindowCompat
-import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.viewModels
 import com.auramusic.app.core.media.AuraMediaService
+import com.auramusic.app.core.notifications.AuraNotificationManager
 import com.auramusic.app.ui.AuraViewModel
 import com.auramusic.app.ui.screens.AuraMainScreen
 import com.auramusic.app.ui.theme.AuraMusicTheme
 
 class MainActivity : ComponentActivity() {
+    private val auraViewModel: AuraViewModel by viewModels()
+
+    private val notificationPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) {
+            AuraNotificationManager.setupFcmSubscription(applicationContext)
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -29,13 +41,23 @@ class MainActivity : ComponentActivity() {
             isAppearanceLightStatusBars = false // Forces status bar text and icons (time, wifi, battery) to be white
             isAppearanceLightNavigationBars = false
         }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            window.isStatusBarContrastEnforced = false
+            window.isNavigationBarContrastEnforced = false
+        }
 
-        // Request POST_NOTIFICATIONS runtime permission for Android 13+ so media controls appear in notification center
+        // Always initialize FCM subscription and sync device with Supabase pool on startup
+        AuraNotificationManager.setupFcmSubscription(applicationContext)
+
+        // Request POST_NOTIFICATIONS runtime permission for Android 13+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
-                requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1001)
+                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
             }
         }
+
+        // Check if opened from an update notification
+        handleUpdateIntent(intent)
 
         try {
             val serviceIntent = Intent(this, AuraMediaService::class.java)
@@ -45,9 +67,22 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             AuraMusicTheme {
-                val auraViewModel: AuraViewModel = viewModel()
                 AuraMainScreen(viewModel = auraViewModel)
             }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleUpdateIntent(intent)
+    }
+
+    private fun handleUpdateIntent(intent: Intent?) {
+        if (intent?.getBooleanExtra("test_update", false) == true) {
+            auraViewModel.triggerTestUpdateModal()
+        } else if (intent?.getBooleanExtra(AuraNotificationManager.EXTRA_OPEN_UPDATE, false) == true) {
+            auraViewModel.checkForUpdates(force = true)
         }
     }
 }

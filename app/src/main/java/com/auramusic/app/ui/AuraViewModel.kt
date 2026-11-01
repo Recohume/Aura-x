@@ -1,13 +1,20 @@
 package com.auramusic.app.ui
 
 import android.app.Application
+import android.widget.Toast
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.auramusic.app.core.extractor.SimpMusicExtractorEngine
 import com.auramusic.app.core.lyrics.SimpMusicLyricsRepository
 import com.auramusic.app.core.media.AuraPlayerManager
+import com.auramusic.app.core.notifications.AuraNotificationManager
 import com.auramusic.app.core.sponsorblock.SponsorBlockRepository
+import com.auramusic.app.core.update.AuraReleaseInfo
+import com.auramusic.app.core.update.AuraUpdateManager
+import com.auramusic.app.core.update.UpdateDownloadProgress
+import com.auramusic.app.core.update.UpdateState
 import com.auramusic.app.data.AuraStorageRepository
+import com.auramusic.app.domain.model.ArtistCarouselItem
 import com.auramusic.app.domain.model.ArtistDetail
 import com.auramusic.app.domain.model.ArtistSong
 import com.auramusic.app.domain.model.AuraPalette
@@ -25,6 +32,7 @@ import com.auramusic.app.domain.model.YtmChartSection
 import com.auramusic.app.domain.model.YtmCommunityPlaylist
 import com.auramusic.app.domain.model.YtmTopArtist
 import com.auramusic.app.ui.theme.extractAuraPaletteFromUrl
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -32,6 +40,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
 
 class AuraViewModel(application: Application) : AndroidViewModel(application) {
     private val storage = AuraStorageRepository(application)
@@ -77,7 +87,7 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
     private val _searchQuery = MutableStateFlow("")
     val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
 
-    private val _searchFilter = MutableStateFlow("songs")
+    private val _searchFilter = MutableStateFlow("all")
     val searchFilter: StateFlow<String> = _searchFilter.asStateFlow()
 
     private val _searchResults = MutableStateFlow<List<AuraTrack>>(SimpMusicExtractorEngine.DEFAULT_SEED_TRACKS)
@@ -86,8 +96,23 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
     private val _isSearching = MutableStateFlow(false)
     val isSearching: StateFlow<Boolean> = _isSearching.asStateFlow()
 
+    private val _searchMatchedArtist = MutableStateFlow<YtmTopArtist?>(null)
+    val searchMatchedArtist: StateFlow<YtmTopArtist?> = _searchMatchedArtist.asStateFlow()
+
+    private val _searchMatchedArtists = MutableStateFlow<List<YtmTopArtist>>(emptyList())
+    val searchMatchedArtists: StateFlow<List<YtmTopArtist>> = _searchMatchedArtists.asStateFlow()
+
+    private val _artistFeaturingItems = MutableStateFlow<List<ArtistCarouselItem>>(emptyList())
+    val artistFeaturingItems: StateFlow<List<ArtistCarouselItem>> = _artistFeaturingItems.asStateFlow()
+
     private val _spotifyImportStatus = MutableStateFlow<String?>(null)
     val spotifyImportStatus: StateFlow<String?> = _spotifyImportStatus.asStateFlow()
+
+    private val _importedPlaylistSuccess = MutableStateFlow<AuraPlaylist?>(null)
+    val importedPlaylistSuccess: StateFlow<AuraPlaylist?> = _importedPlaylistSuccess.asStateFlow()
+
+    private val _selectedUserPlaylist = MutableStateFlow<AuraPlaylist?>(null)
+    val selectedUserPlaylist: StateFlow<AuraPlaylist?> = _selectedUserPlaylist.asStateFlow()
 
     // Library (Favorites, Downloads, Playlists, Stats)
     private val _favorites = MutableStateFlow<List<AuraTrack>>(emptyList())
@@ -127,10 +152,29 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
     private val _nowPlayingStyle = MutableStateFlow(NowPlayingStyle.SPOTIFY)
     val nowPlayingStyle: StateFlow<NowPlayingStyle> = _nowPlayingStyle.asStateFlow()
 
+    // In-App Updates & Releases
+    private val _currentUpdateRelease = MutableStateFlow<AuraReleaseInfo?>(null)
+    val currentUpdateRelease: StateFlow<AuraReleaseInfo?> = _currentUpdateRelease.asStateFlow()
+
+    private val _isUpdateModalVisible = MutableStateFlow(false)
+    val isUpdateModalVisible: StateFlow<Boolean> = _isUpdateModalVisible.asStateFlow()
+
+    private val _updateState = MutableStateFlow(UpdateState.IDLE)
+    val updateState: StateFlow<UpdateState> = _updateState.asStateFlow()
+
+    private val _updateDownloadProgress = MutableStateFlow(UpdateDownloadProgress())
+    val updateDownloadProgress: StateFlow<UpdateDownloadProgress> = _updateDownloadProgress.asStateFlow()
+
+    private val _updateErrorMessage = MutableStateFlow<String?>(null)
+    val updateErrorMessage: StateFlow<String?> = _updateErrorMessage.asStateFlow()
+
+    private var downloadedApkFile: File? = null
+
     private var searchJob: Job? = null
 
     init {
         AuraPlayerManager.initialize(application)
+        AuraNotificationManager.setupFcmSubscription(application)
         _favorites.value = storage.loadFavorites()
         _downloads.value = storage.loadDownloads()
         _playlists.value = storage.loadPlaylists()
@@ -138,6 +182,9 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
         _listeningStats.value = storage.loadListeningStats()
         _nowPlayingStyle.value = NowPlayingStyle.SPOTIFY
         storage.saveNowPlayingStyle(NowPlayingStyle.SPOTIFY)
+
+        // Silent startup check against GitHub Releases
+        checkForUpdates(force = false)
 
         AuraPlayerManager.onTrackFinishedCallback = { finishedTrack ->
             _listeningStats.value = storage.recordTrackPlay(finishedTrack)
@@ -219,7 +266,8 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
                 name = artist.name,
                 subscribers = artist.subscribers,
                 bannerUrl = artist.avatarUrl,
-                topSongs = emptyList()
+                topSongs = emptyList(),
+                albums = emptyList()
             )
             val fullDetail = SimpMusicExtractorEngine.fetchArtistDetail(artist)
             _selectedArtistDetail.value = fullDetail
@@ -227,8 +275,43 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun openArtistByName(artistName: String, songTitle: String = "", fallbackArtwork: String = "") {
+        if (artistName.isBlank()) return
+        val existingInTop = _topArtists.value.firstOrNull { it.name == artistName }
+        if (existingInTop != null && songTitle.isBlank()) {
+            openArtistDetail(existingInTop)
+            return
+        }
+        viewModelScope.launch {
+            _isArtistLoading.value = true
+            _selectedArtistDetail.value = ArtistDetail(
+                id = "",
+                name = artistName,
+                subscribers = "",
+                bannerUrl = fallbackArtwork,
+                topSongs = emptyList(),
+                albums = emptyList()
+            )
+            val fullDetail = SimpMusicExtractorEngine.fetchArtistByName(artistName, songTitle, fallbackArtwork)
+            _selectedArtistDetail.value = fullDetail
+            _isArtistLoading.value = false
+        }
+    }
+
     fun closeArtistDetail() {
         _selectedArtistDetail.value = null
+    }
+
+    fun selectUserPlaylist(playlist: AuraPlaylist?) {
+        _selectedUserPlaylist.value = playlist
+    }
+
+    fun clearSelectedUserPlaylist() {
+        _selectedUserPlaylist.value = null
+    }
+
+    fun dismissImportSuccessModal() {
+        _importedPlaylistSuccess.value = null
     }
 
     fun openPlaylistDetail(playlist: YtmCommunityPlaylist) {
@@ -246,6 +329,18 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
             _selectedPlaylistDetail.value = fullDetail
             _isPlaylistLoading.value = false
         }
+    }
+
+    fun openAlbumOrPlaylist(id: String, title: String, author: String, artworkUrl: String) {
+        openPlaylistDetail(
+            YtmCommunityPlaylist(
+                id = id,
+                title = title,
+                author = author,
+                trackCount = "",
+                artworkUrl = artworkUrl
+            )
+        )
     }
 
     fun closePlaylistDetail() {
@@ -286,18 +381,75 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
         _searchQuery.value = query
         searchJob?.cancel()
         if (query.isBlank()) {
+            _searchMatchedArtist.value = null
+            _searchMatchedArtists.value = emptyList()
+            _artistFeaturingItems.value = emptyList()
             _searchResults.value = _chartSections.value.firstOrNull()?.tracks
                 ?: SimpMusicExtractorEngine.DEFAULT_SEED_TRACKS
             return
         }
         searchJob = viewModelScope.launch {
             _isSearching.value = true
-            val results = SimpMusicExtractorEngine.searchYouTubeMusic(query, _searchFilter.value)
+            _searchResults.value = emptyList()
+            _searchMatchedArtist.value = null
+            _searchMatchedArtists.value = emptyList()
+            _artistFeaturingItems.value = emptyList()
+
+            // Parallel artist search for top artist card, artist list & featuring carousels
+            val artistDeferred = async {
+                if (query.trim().isNotEmpty()) {
+                    try {
+                        SimpMusicExtractorEngine.searchArtists(query.trim())
+                    } catch (_: Exception) {
+                        emptyList()
+                    }
+                } else emptyList()
+            }
+            val resultsDeferred = async {
+                SimpMusicExtractorEngine.searchYouTubeMusic(query, _searchFilter.value)
+            }
+
+            val artists = artistDeferred.await()
+            val matched = artists.firstOrNull()
+            _searchMatchedArtists.value = artists
+            _searchMatchedArtist.value = matched
+
+            val results = resultsDeferred.await()
             if (results.isNotEmpty()) {
                 _searchResults.value = results
+            } else if (_searchFilter.value == "artists" && matched != null) {
+                // If filter is artists and tracks are empty, prefetch top tracks for that artist
+                try {
+                    val detail = SimpMusicExtractorEngine.fetchArtistDetail(matched)
+                    _searchResults.value = detail.topSongs.map { it.track }
+                } catch (_: Exception) {}
             }
+
+            if (matched != null) {
+                try {
+                    val detail = SimpMusicExtractorEngine.fetchArtistDetail(matched)
+                    val feat = detail.carousels.firstOrNull {
+                        it.title.contains("Featuring", ignoreCase = true) ||
+                        it.title.contains("Singles", ignoreCase = true) ||
+                        it.title.contains("Albums", ignoreCase = true)
+                    }?.items ?: detail.albums.map {
+                        ArtistCarouselItem(id = it.id, title = it.title, subtitle = it.year, artworkUrl = it.artworkUrl, browseId = it.id)
+                    }
+                    _artistFeaturingItems.value = feat.take(10)
+                } catch (_: Exception) {
+                    _artistFeaturingItems.value = emptyList()
+                }
+            } else {
+                _artistFeaturingItems.value = emptyList()
+            }
+
             _isSearching.value = false
         }
+    }
+
+    fun removeFromRecentlyPlayed(track: AuraTrack) {
+        storage.removeRecentlyPlayed(track.videoId)
+        _recentlyPlayed.value = storage.loadRecentlyPlayed()
     }
 
     fun setSearchFilter(filter: String) {
@@ -320,6 +472,17 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
 
     fun playTrack(track: AuraTrack, queue: List<AuraTrack>? = null) {
         AuraPlayerManager.playTrack(track, queue)
+        _listeningStats.value = storage.recordTrackPlay(track)
+    }
+
+    fun playSearchTrack(track: AuraTrack, results: List<AuraTrack>) {
+        if (AuraPlayerManager.isShuffleEnabled.value) {
+            val shuffledQueue = results.filterNot { it.videoId == track.videoId }.shuffled()
+            AuraPlayerManager.playTrack(track, listOf(track) + shuffledQueue, allowRadioQueue = true)
+        } else {
+            // Playing from search query should NOT auto-play other songs from search results unless shuffle is enabled
+            AuraPlayerManager.playTrack(track, listOf(track), allowRadioQueue = false)
+        }
         _listeningStats.value = storage.recordTrackPlay(track)
     }
 
@@ -366,8 +529,23 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
                 _playlists.value = updated
                 storage.savePlaylists(updated)
                 _spotifyImportStatus.value = "Imported '${playlist.name}' (${playlist.tracks.size} tracks)"
+                _importedPlaylistSuccess.value = playlist
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(
+                        getApplication(),
+                        "Imported '${playlist.name}' (${playlist.tracks.size} tracks) successfully!",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
             } else {
                 _spotifyImportStatus.value = "Could not parse public Spotify playlist URL"
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(
+                        getApplication(),
+                        "Could not parse Spotify playlist. Please check the link and try again.",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
             }
         }
     }
@@ -424,5 +602,125 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
 
     fun selectEqualizerPreset(preset: EqualizerPreset) {
         AuraPlayerManager.selectEqualizerPreset(preset)
+    }
+
+    fun checkForUpdates(force: Boolean = false) {
+        viewModelScope.launch {
+            val release = AuraUpdateManager.checkForUpdates(getApplication(), force)
+            if (release != null) {
+                _currentUpdateRelease.value = release
+                _updateState.value = UpdateState.IDLE
+                _updateErrorMessage.value = null
+                _isUpdateModalVisible.value = true
+            } else if (force) {
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(
+                        getApplication(),
+                        "You're already on the latest version of AURA Music!",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+            }
+        }
+    }
+
+    fun openUpdateModalForRelease(release: AuraReleaseInfo) {
+        _currentUpdateRelease.value = release
+        _updateState.value = UpdateState.IDLE
+        _updateErrorMessage.value = null
+        _isUpdateModalVisible.value = true
+    }
+
+    /**
+     * Test trigger to preview the AuraUpdateModal UI and verify release changelog styling.
+     */
+    fun triggerTestUpdateModal() {
+        val testRelease = AuraReleaseInfo(
+            version = "1.3.0",
+            tagName = "v1.3.0",
+            releaseTitle = "Aura v1.3.0 • High-Definition Artwork & Full-Screen OTA",
+            releaseNotes = """
+Aura v1.3 is a major release introducing the full-screen OTA update experience, real-time Firebase Cloud Messaging (FCM) delivery, Supabase subscription pooling, and crystal-clear 544px square artwork processing across YouTube Music InnerTube streams.
+
+### What's Changed
+- High-Resolution Artwork: Replaced low-resolution 60px/120px thumbnails with crisp 544x544 square album art and 720p HD video thumbnails.
+- Firebase Cloud Messaging (FCM): Real-time push notification delivery for instant update broadcasts and new release drops.
+- Supabase Subscription Pooling: Decentralized device registration directly into Supabase PostgREST pool with installation UUIDs.
+- In-App Full-Screen Update Experience: Yomite-inspired full-screen release view with fluid parallax scroll, markdown changelog rendering, and direct APK download/install.
+- Settings Screen Diagnostic Hub: Added update check triggers, push notification status indicators, and live changelog previewer.
+
+### Key Features
+- Native 544x544 square retina album art resolution for all YouTube Music tracks.
+- High-definition 720p video cover fallbacks.
+- Spotify imported playlist artwork resolution parity.
+- Direct client-to-GitHub Releases engine bypasses external server dependencies.
+- Multi-threaded streaming APK download directly to app cache with real-time percentage indicators.
+- Native Android PackageInstaller invocation via secure FileProvider.
+            """.trimIndent(),
+            downloadUrl = "https://github.com/jlfuertes14/Aura-Music/releases",
+            fileName = "aura-music-v1.3-universal.apk",
+            apkSize = 32_504_663L,
+            publishedAt = "2026-10-30T12:00:00Z",
+            htmlUrl = "https://github.com/jlfuertes14/Aura-Music/releases"
+        )
+        _currentUpdateRelease.value = testRelease
+        _updateState.value = UpdateState.IDLE
+        _updateErrorMessage.value = null
+        _isUpdateModalVisible.value = true
+    }
+
+    fun dismissUpdateModal() {
+        if (_updateState.value != UpdateState.DOWNLOADING) {
+            _isUpdateModalVisible.value = false
+        }
+    }
+
+    fun snoozeUpdate(version: String) {
+        AuraUpdateManager.snoozeUpdate(getApplication(), version)
+        _isUpdateModalVisible.value = false
+    }
+
+    fun downloadAndInstallUpdate(release: AuraReleaseInfo) {
+        viewModelScope.launch {
+            if (!release.downloadUrl.endsWith(".apk", ignoreCase = true) && !release.downloadUrl.contains("/download/")) {
+                // Interactive preview mode: simulate smooth download streaming for UI evaluation
+                _updateState.value = UpdateState.DOWNLOADING
+                _updateErrorMessage.value = null
+                for (pct in 1..100) {
+                    kotlinx.coroutines.delay(35)
+                    val written = (release.apkSize * (pct / 100f)).toLong()
+                    _updateDownloadProgress.value = UpdateDownloadProgress(
+                        writtenBytes = written,
+                        totalBytes = release.apkSize,
+                        fraction = pct / 100f
+                    )
+                }
+                _updateState.value = UpdateState.READY
+                return@launch
+            }
+
+            _updateState.value = UpdateState.DOWNLOADING
+            _updateErrorMessage.value = null
+            _updateDownloadProgress.value = UpdateDownloadProgress()
+
+            val result = AuraUpdateManager.downloadApk(getApplication(), release) { progress ->
+                _updateDownloadProgress.value = progress
+            }
+
+            result.onSuccess { apkFile ->
+                downloadedApkFile = apkFile
+                _updateState.value = UpdateState.READY
+                AuraUpdateManager.installApk(getApplication(), apkFile)
+            }.onFailure { err ->
+                _updateState.value = UpdateState.ERROR
+                _updateErrorMessage.value = err.message ?: "Failed to download update APK"
+            }
+        }
+    }
+
+    fun installDownloadedApk(release: AuraReleaseInfo) {
+        downloadedApkFile?.let { apkFile ->
+            AuraUpdateManager.installApk(getApplication(), apkFile)
+        } ?: downloadAndInstallUpdate(release)
     }
 }

@@ -16,7 +16,10 @@ class AuraApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        // Enforce dark/night mode globally across all framework windows and dialogs
+        androidx.appcompat.app.AppCompatDelegate.setDefaultNightMode(androidx.appcompat.app.AppCompatDelegate.MODE_NIGHT_YES)
         createNotificationChannel()
+        com.auramusic.app.core.notifications.AuraNotificationManager.createChannels(this)
         SimpMusicExtractorEngine.initExtractors()
         AuraPlayerManager.initialize(this)
     }

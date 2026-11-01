@@ -41,17 +41,43 @@ data class AuraTrack(
     val hasLyricsBadge: Boolean = true
 ) {
     val highResArtworkUrl: String
-        get() = when {
-            artworkUrl.isNotBlank() && (artworkUrl.contains("googleusercontent.com") || artworkUrl.contains("ggpht.com")) ->
-                artworkUrl.replace(Regex("=w\\d+-h\\d+[^&?]*"), "=w1200-h1200-l90-rj")
-            artworkUrl.isNotBlank() && artworkUrl.contains("i.scdn.co") ->
-                artworkUrl
-            artworkUrl.isNotBlank() && artworkUrl.contains("youtube.com") ->
-                artworkUrl.replace("hqdefault.jpg", "maxresdefault.jpg")
-            artworkUrl.isNotBlank() -> artworkUrl
-            videoId.isNotBlank() -> "https://img.youtube.com/vi/$videoId/maxresdefault.jpg"
-            else -> ""
+        get() = toHighResArtwork(artworkUrl, videoId)
+}
+
+/**
+ * Normalizes artwork URLs from YouTube Music, Google User Content, and YouTube CDN
+ * to fetch high-definition (544x544 square / 720p HD) images.
+ */
+fun toHighResArtwork(url: String, videoId: String = ""): String {
+    if (url.isBlank() && videoId.isNotBlank()) {
+        return "https://i.ytimg.com/vi/$videoId/hq720.jpg"
+    }
+    if (url.isBlank()) return ""
+
+    return when {
+        // Google User Content / Ggpht (YouTube Music standard square CDN)
+        url.contains("googleusercontent.com") || url.contains("ggpht.com") -> {
+            // Strip any low-res signed query parameters (?sqp=...)
+            val clean = url.substringBefore("?")
+            if (clean.contains("=")) {
+                // Replaces =s60, =s120, =s540, =w60-h60, =w120-h120 with official YTM 544x544 square album art
+                clean.replace(Regex("=.*$"), "=w544-h544-l90-rj")
+            } else {
+                "$clean=w544-h544-l90-rj"
+            }
         }
+        // Spotify CDN (already native crisp 640x640)
+        url.contains("i.scdn.co") -> url
+        // YouTube video thumbnails (img.youtube.com or i.ytimg.com)
+        url.contains("youtube.com") || url.contains("ytimg.com") -> {
+            when {
+                url.contains("hqdefault.jpg") -> url.replace("hqdefault.jpg", "hq720.jpg")
+                url.contains("maxresdefault.jpg") -> url.replace("maxresdefault.jpg", "hq720.jpg")
+                else -> url
+            }
+        }
+        else -> url
+    }
 }
 
 data class LyricWord(
@@ -189,15 +215,21 @@ data class YtmTopArtist(
     val name: String,
     val subscribers: String,
     val avatarUrl: String
-)
+) {
+    val highResAvatarUrl: String
+        get() = toHighResArtwork(avatarUrl)
+}
 
 data class YtmCommunityPlaylist(
     val id: String,
     val title: String,
     val author: String,
-    val trackCount: String,
-    val artworkUrl: String
-)
+    val trackCount: String = "",
+    val artworkUrl: String = ""
+) {
+    val highResArtworkUrl: String
+        get() = toHighResArtwork(artworkUrl)
+}
 
 data class ArtistSong(
     val rank: Int,
@@ -205,12 +237,43 @@ data class ArtistSong(
     val playCount: String = ""
 )
 
+data class ArtistAlbum(
+    val id: String,
+    val title: String,
+    val year: String = "",
+    val artworkUrl: String = "",
+    val type: String = "Album"
+) {
+    val highResArtworkUrl: String
+        get() = toHighResArtwork(artworkUrl)
+}
+
+data class ArtistCarouselItem(
+    val id: String,
+    val title: String,
+    val subtitle: String = "",
+    val artworkUrl: String = "",
+    val endpointType: String = "album", // "album", "video", "playlist", "artist"
+    val videoId: String = "",
+    val browseId: String = ""
+) {
+    val highResArtworkUrl: String
+        get() = toHighResArtwork(artworkUrl)
+}
+
+data class ArtistCarousel(
+    val title: String,
+    val items: List<ArtistCarouselItem>
+)
+
 data class ArtistDetail(
     val id: String,
     val name: String,
     val subscribers: String,
     val bannerUrl: String,
-    val topSongs: List<ArtistSong>
+    val topSongs: List<ArtistSong>,
+    val albums: List<ArtistAlbum> = emptyList(),
+    val carousels: List<ArtistCarousel> = emptyList()
 )
 
 data class PlaylistTrackItem(
@@ -225,6 +288,7 @@ data class PlaylistDetail(
     val author: String,
     val trackCount: String,
     val bannerUrl: String,
-    val tracks: List<PlaylistTrackItem>
+    val tracks: List<PlaylistTrackItem>,
+    val totalViews: String = ""
 )
 

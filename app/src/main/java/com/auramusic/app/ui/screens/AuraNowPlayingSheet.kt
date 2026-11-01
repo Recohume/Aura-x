@@ -2,9 +2,15 @@ package com.auramusic.app.ui.screens
 
 import android.content.Context
 import android.media.AudioManager
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -15,8 +21,17 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
+import java.util.Collections
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -33,6 +48,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -53,13 +69,17 @@ import androidx.compose.material.icons.automirrored.rounded.VolumeDown
 import androidx.compose.material.icons.automirrored.rounded.VolumeUp
 import androidx.compose.material.icons.rounded.AddCircleOutline
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.DragHandle
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.OpenInFull
+import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.Pause
+import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.PlaylistAdd
 import androidx.compose.material.icons.rounded.Repeat
 import androidx.compose.material.icons.rounded.RepeatOne
 import androidx.compose.material.icons.rounded.Shuffle
@@ -71,6 +91,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -87,18 +108,29 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -106,6 +138,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
+import kotlin.math.roundToInt
 import coil.compose.AsyncImage
 import com.auramusic.app.core.lyrics.SimpMusicLyricsRepository
 import com.auramusic.app.core.media.AuraPlayerManager
@@ -121,6 +155,8 @@ import com.auramusic.app.ui.theme.SpotifyCard
 import com.auramusic.app.ui.theme.SpotifyPitchBlack
 import com.auramusic.app.ui.theme.TextPrimary
 import com.auramusic.app.ui.theme.TextSecondary
+
+private inline fun lerpFloat(start: Float, stop: Float, fraction: Float): Float = start + (stop - start) * fraction
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -146,119 +182,544 @@ fun AuraNowPlayingSheet(
     onToggleFavorite: () -> Unit,
     onToggleShuffle: () -> Unit,
     onToggleStyle: () -> Unit,
+    onOpenArtist: (String) -> Unit = {},
     onPlayQueueTrack: (AuraTrack) -> Unit,
     onAdjustLyricsOffset: (Int) -> Unit,
     onToggleRomanized: () -> Unit
 ) {
     var isLyricsExpanded by remember { mutableStateOf(false) }
+    var lyricsCardBounds by remember { mutableStateOf<Rect?>(null) }
     var isQueueSheetVisible by remember { mutableStateOf(false) }
+    var isOptionsModalVisible by remember { mutableStateOf(false) }
 
-    // Fully opaque solid black root container: zero background bleed-through
-    Box(
+    val focusManager = LocalFocusManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
+
+    // Always dismiss any lingering search input focus / soft keyboard when opening player or its modals
+    LaunchedEffect(Unit, isQueueSheetVisible, isOptionsModalVisible, isLyricsExpanded) {
+        focusManager.clearFocus(force = true)
+        keyboardController?.hide()
+    }
+
+    // Intercept back gesture / button to smoothly close expanded lyrics
+    BackHandler(enabled = isLyricsExpanded) {
+        isLyricsExpanded = false
+    }
+
+    // Root container matching sheet bounds - 100% solid background so underlying screens never bleed through
+    BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.Black)
+            .background(Color(0xFF14151B))
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = {} // Intercepts all clicks so background screens (search field, home items) are never touched
+            )
     ) {
-        // Smooth transition between Spotify Encore and Blur Style - Liquid Glass
-        Crossfade(
-            targetState = currentStyle,
-            label = "NowPlayingStyleCrossfade",
-            animationSpec = tween(350)
-        ) { style ->
-            when (style) {
-                NowPlayingStyle.SPOTIFY -> {
-                    SpotifyEncorePlayerView(
-                        track = track,
-                        isPlaying = isPlaying,
-                        isBuffering = isBuffering,
-                        positionSec = positionSec,
-                        durationSec = durationSec,
-                        palette = palette,
-                        lyrics = lyrics,
-                        lyricsOffsetMs = lyricsOffsetMs,
-                        isFavorite = isFavorite,
-                        isShuffleEnabled = isShuffleEnabled,
-                        onCollapse = onCollapse,
-                        onTogglePlayPause = onTogglePlayPause,
-                        onSeekTo = onSeekTo,
-                        onSkipNext = onSkipNext,
-                        onSkipPrevious = onSkipPrevious,
-                        onToggleFavorite = onToggleFavorite,
-                        onToggleShuffle = onToggleShuffle,
-                        onToggleStyle = onToggleStyle,
-                        onOpenLyrics = { isLyricsExpanded = true },
-                        onOpenQueue = { isQueueSheetVisible = true }
-                    )
+        val fullHeightPx = constraints.maxHeight.toFloat()
+
+        // Lyrics expansion progress: 0f = collapsed on card, 1f = fully expanded
+        val lyricsExpansionProgress by animateFloatAsState(
+            targetValue = if (isLyricsExpanded) 1f else 0f,
+            animationSpec = tween(
+                durationMillis = if (isLyricsExpanded) 380 else 320,
+                easing = CubicBezierEasing(0.23f, 1f, 0.32f, 1f)
+            ),
+            label = "lyricsExpansionProgress"
+        )
+
+        // Player view wrapper: stays anchored in place, subtly scaling without alpha transparency
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer {
+                    val scale = 0.94f + (0.06f * (1f - lyricsExpansionProgress))
+                    scaleX = scale
+                    scaleY = scale
                 }
-                NowPlayingStyle.LIQUID_GLASS -> {
-                    LiquidGlassPlayerView(
-                        track = track,
-                        isPlaying = isPlaying,
-                        isBuffering = isBuffering,
-                        positionSec = positionSec,
-                        durationSec = durationSec,
-                        isFavorite = isFavorite,
-                        isShuffleEnabled = isShuffleEnabled,
-                        onCollapse = onCollapse,
-                        onTogglePlayPause = onTogglePlayPause,
-                        onSeekTo = onSeekTo,
-                        onSkipNext = onSkipNext,
-                        onSkipPrevious = onSkipPrevious,
-                        onToggleFavorite = onToggleFavorite,
-                        onToggleShuffle = onToggleShuffle,
-                        onToggleStyle = onToggleStyle,
-                        onOpenLyrics = { isLyricsExpanded = true },
-                        onOpenQueue = { isQueueSheetVisible = true }
-                    )
+        ) {
+            Crossfade(
+                targetState = currentStyle,
+                label = "NowPlayingStyleCrossfade",
+                animationSpec = tween(350)
+            ) { style ->
+                when (style) {
+                    NowPlayingStyle.SPOTIFY -> {
+                        SpotifyEncorePlayerView(
+                            track = track,
+                            isPlaying = isPlaying,
+                            isBuffering = isBuffering,
+                            positionSec = positionSec,
+                            durationSec = durationSec,
+                            palette = palette,
+                            lyrics = lyrics,
+                            lyricsOffsetMs = lyricsOffsetMs,
+                            isFavorite = isFavorite,
+                            isShuffleEnabled = isShuffleEnabled,
+                            lyricsExpansionProgress = lyricsExpansionProgress,
+                            onCollapse = onCollapse,
+                            onTogglePlayPause = onTogglePlayPause,
+                            onSeekTo = onSeekTo,
+                            onSkipNext = onSkipNext,
+                            onSkipPrevious = onSkipPrevious,
+                            onToggleFavorite = onToggleFavorite,
+                            onToggleShuffle = onToggleShuffle,
+                            onOpenArtist = {
+                                onCollapse()
+                                onOpenArtist(track.artist)
+                            },
+                            onOptionsClick = { isOptionsModalVisible = true },
+                            onOpenLyrics = { isLyricsExpanded = true },
+                            onOpenQueue = { isQueueSheetVisible = true },
+                            onCardPositioned = { lyricsCardBounds = it }
+                        )
+                    }
+                    NowPlayingStyle.LIQUID_GLASS -> {
+                        LiquidGlassPlayerView(
+                            track = track,
+                            isPlaying = isPlaying,
+                            isBuffering = isBuffering,
+                            positionSec = positionSec,
+                            durationSec = durationSec,
+                            isFavorite = isFavorite,
+                            isShuffleEnabled = isShuffleEnabled,
+                            onCollapse = onCollapse,
+                            onTogglePlayPause = onTogglePlayPause,
+                            onSeekTo = onSeekTo,
+                            onSkipNext = onSkipNext,
+                            onSkipPrevious = onSkipPrevious,
+                            onToggleFavorite = onToggleFavorite,
+                            onToggleShuffle = onToggleShuffle,
+                            onOpenArtist = {
+                                onCollapse()
+                                onOpenArtist(track.artist)
+                            },
+                            onOptionsClick = { isOptionsModalVisible = true },
+                            onOpenLyrics = { isLyricsExpanded = true },
+                            onOpenQueue = { isQueueSheetVisible = true },
+                            onCardPositioned = { lyricsCardBounds = it }
+                        )
+                    }
                 }
             }
         }
 
-        // Full Screen Song Lyrics Screen (Expanded) with 100% solid background
-        AnimatedVisibility(
-            visible = isLyricsExpanded,
-            enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
-            exit = slideOutVertically(targetOffsetY = { it }) + fadeOut()
-        ) {
-            FullScreenSongLyricsView(
-                track = track,
-                lyrics = lyrics,
-                positionSec = positionSec + (lyricsOffsetMs / 1000f),
-                durationSec = durationSec,
-                isPlaying = isPlaying,
-                isBuffering = isBuffering,
-                lyricsOffsetMs = lyricsOffsetMs,
-                showRomanized = showRomanized,
-                palette = palette,
-                onClose = { isLyricsExpanded = false },
-                onSeekTo = onSeekTo,
-                onTogglePlayPause = onTogglePlayPause,
-                onSkipPrevious = onSkipPrevious,
-                onSkipNext = onSkipNext,
-                onOpenQueue = { isQueueSheetVisible = true },
-                onAdjustLyricsOffset = onAdjustLyricsOffset,
-                onToggleRomanized = onToggleRomanized
+        // Dark dimming scrim over player view when lyrics is expanding/expanded
+        if (lyricsExpansionProgress > 0.001f) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.50f * lyricsExpansionProgress))
             )
         }
 
-        // Upcoming Queue Bottom Sheet
+        // Full Screen Song Lyrics Screen:
+        // Shared Element Transition (Hero animation / FLIP morphing):
+        // Automatically tracks the exact physical position, width, and height of the lyrics card.
+        // Opens by expanding fluidly outwards from the card's exact geometry.
+        // Closes by morphing and physically traveling back into its original slot on the screen!
+        if (lyricsExpansionProgress > 0.001f) {
+            val fullWidthPx = constraints.maxWidth.toFloat()
+            val density = LocalDensity.current
+
+            val fallbackMargin = with(density) { 20.dp.toPx() }
+            val fallbackWidth = fullWidthPx - (fallbackMargin * 2f)
+            val fallbackHeight = with(density) { 280.dp.toPx() }
+            val fallbackTop = fullHeightPx - with(density) { 340.dp.toPx() }
+
+            val startLeft = lyricsCardBounds?.left ?: fallbackMargin
+            val startTop = lyricsCardBounds?.top ?: fallbackTop
+            val startWidth = lyricsCardBounds?.width?.takeIf { it > 10f } ?: fallbackWidth
+            val startHeight = lyricsCardBounds?.height?.takeIf { it > 10f } ?: fallbackHeight
+
+            val currentLeft = lerpFloat(startLeft, 0f, lyricsExpansionProgress)
+            val currentTop = lerpFloat(startTop, 0f, lyricsExpansionProgress)
+            val currentWidth = lerpFloat(startWidth, fullWidthPx, lyricsExpansionProgress)
+            val currentHeight = lerpFloat(startHeight, fullHeightPx, lyricsExpansionProgress)
+
+            val currentLeftDp = with(density) { currentLeft.toDp() }
+            val currentTopDp = with(density) { currentTop.toDp() }
+            val currentWidthDp = with(density) { currentWidth.toDp() }
+            val currentHeightDp = with(density) { currentHeight.toDp() }
+            val currentCornerRadius = lerpFloat(20f, 0f, lyricsExpansionProgress)
+
+            Box(
+                modifier = Modifier
+                    .offset(x = currentLeftDp, y = currentTopDp)
+                    .size(width = currentWidthDp, height = currentHeightDp)
+                    .clip(RoundedCornerShape(currentCornerRadius.dp))
+                    .background(palette.primary)
+                    .shadow(
+                        elevation = 16.dp * (1f - lyricsExpansionProgress),
+                        shape = RoundedCornerShape(currentCornerRadius.dp)
+                    )
+            ) {
+                // When expanding or collapsing, FullScreenSongLyricsView renders inside the clipped container
+                // with 100% natural font size (scaleX = 1f, scaleY = 1f, ZERO squashing or text compression!)
+                // Player controls are completely hidden when shrinking back to the lyrics card slot
+                FullScreenSongLyricsView(
+                    track = track,
+                    lyrics = lyrics,
+                    positionSec = positionSec + (lyricsOffsetMs / 1000f),
+                    durationSec = durationSec,
+                    isPlaying = isPlaying,
+                    isBuffering = isBuffering,
+                    lyricsOffsetMs = lyricsOffsetMs,
+                    showRomanized = showRomanized,
+                    palette = palette,
+                    showPlayerControls = isLyricsExpanded && lyricsExpansionProgress >= 0.90f,
+                    lyricsExpansionProgress = lyricsExpansionProgress,
+                    onClose = { isLyricsExpanded = false },
+                    onSeekTo = onSeekTo,
+                    onTogglePlayPause = onTogglePlayPause,
+                    onSkipPrevious = onSkipPrevious,
+                    onSkipNext = onSkipNext,
+                    onOpenQueue = { isQueueSheetVisible = true },
+                    onAdjustLyricsOffset = onAdjustLyricsOffset,
+                    onToggleRomanized = onToggleRomanized
+                )
+
+                // Smooth seamless card preview blend when close to the bottom slot
+                // Matches the card's exact 16.sp font size and layout without any jump
+                if (lyricsExpansionProgress < 0.35f) {
+                    val previewFadeAlpha = (1f - (lyricsExpansionProgress / 0.35f)).coerceIn(0f, 1f)
+                    Surface(
+                        color = palette.primary,
+                        shape = RoundedCornerShape(currentCornerRadius.dp),
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .graphicsLayer { alpha = previewFadeAlpha }
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(20.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "Lyrics",
+                                    fontSize = 17.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White
+                                )
+
+                                Surface(
+                                    shape = CircleShape,
+                                    color = Color.Black.copy(alpha = 0.35f),
+                                    modifier = Modifier.size(32.dp)
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            imageVector = Icons.Rounded.OpenInFull,
+                                            contentDescription = null,
+                                            tint = Color.White,
+                                            modifier = Modifier.size(15.dp)
+                                        )
+                                    }
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(16.dp))
+
+                            val lines = lyrics?.syncedLines ?: emptyList()
+                            val effectiveSec = positionSec + (lyricsOffsetMs / 1000f)
+                            val activeIdx = lines.indexOfLast { effectiveSec >= it.timeSec }.coerceAtLeast(0)
+
+                            if (lines.isEmpty()) {
+                                Text(
+                                    text = SimpMusicLyricsRepository.unescapeLyricsHtml(
+                                        lyrics?.plainLyrics?.take(180)?.ifBlank { "Tap to view lyrics" } ?: "Tap to view lyrics"
+                                    ),
+                                    fontSize = 16.sp,
+                                    lineHeight = 24.sp,
+                                    color = Color.White.copy(alpha = 0.85f),
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            } else {
+                                val current = lines.getOrNull(activeIdx)
+                                if (current != null) {
+                                    Text(
+                                        text = SimpMusicLyricsRepository.unescapeLyricsHtml(current.text),
+                                        fontSize = 18.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color.White,
+                                        lineHeight = 26.sp
+                                    )
+                                }
+                                val next1 = lines.getOrNull(activeIdx + 1)
+                                if (next1 != null) {
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Text(
+                                        text = SimpMusicLyricsRepository.unescapeLyricsHtml(next1.text),
+                                        fontSize = 16.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        color = Color.White.copy(alpha = 0.60f),
+                                        lineHeight = 24.sp
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Harmonized dark container color subtly tinted with dominant lyrics card palette color
+        val modalContainerColor = remember(palette.primary) {
+            lerp(Color(0xFF14151B), palette.primary, 0.18f)
+        }
+
+        // 3-Dot Options Bottom Sheet Modal
+        if (isOptionsModalVisible) {
+            NowPlayingOptionsModal(
+                track = track,
+                currentStyle = currentStyle,
+                isFavorite = isFavorite,
+                modalContainerColor = modalContainerColor,
+                onDismiss = { isOptionsModalVisible = false },
+                onToggleTheme = {
+                    isOptionsModalVisible = false
+                    onToggleStyle()
+                },
+                onGoToArtist = {
+                    isOptionsModalVisible = false
+                    onCollapse()
+                    onOpenArtist(track.artist)
+                },
+                onToggleFavorite = {
+                    onToggleFavorite()
+                    isOptionsModalVisible = false
+                },
+                onPlayNext = {
+                    AuraPlayerManager.playNext(track)
+                    isOptionsModalVisible = false
+                },
+                onAddToQueue = {
+                    AuraPlayerManager.enqueueTrack(track)
+                    isOptionsModalVisible = false
+                },
+                onOpenQueue = {
+                    isOptionsModalVisible = false
+                    isQueueSheetVisible = true
+                },
+                onOpenLyrics = {
+                    isOptionsModalVisible = false
+                    isLyricsExpanded = true
+                }
+            )
+        }
+
+        // Upcoming Queue Mobile Bottom Sheet Modal
         if (isQueueSheetVisible) {
             ModalBottomSheet(
                 onDismissRequest = { isQueueSheetVisible = false },
                 sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-                containerColor = SpotifyCard,
-                contentColor = TextPrimary
-            ) {
-                QueueSheetContent(
-                    currentTrack = track,
-                    queue = queue,
-                    onPlayTrack = {
-                        onPlayQueueTrack(it)
-                        isQueueSheetVisible = false
+                containerColor = modalContainerColor,
+                contentColor = TextPrimary,
+                dragHandle = {
+                    Surface(
+                        modifier = Modifier.padding(top = 10.dp, bottom = 6.dp),
+                        color = Color.White.copy(alpha = 0.25f),
+                        shape = RoundedCornerShape(4.dp)
+                    ) {
+                        Spacer(modifier = Modifier.size(width = 36.dp, height = 4.dp))
                     }
-                )
+                }
+            ) {
+                com.auramusic.app.ui.components.ForceWhiteSystemBarsEffect()
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .fillMaxHeight(0.55f)
+                ) {
+                    QueueSheetContent(
+                        currentTrack = track,
+                        queue = queue,
+                        modalContainerColor = modalContainerColor,
+                        onPlayTrack = {
+                            onPlayQueueTrack(it)
+                            isQueueSheetVisible = false
+                        },
+                        onReorderQueue = { newUpcoming ->
+                            AuraPlayerManager.updateUpcomingQueue(newUpcoming)
+                        }
+                    )
+                }
             }
         }
+    }
+}
+
+/**
+ * 3-Dot Options Bottom Sheet Modal on Full Music Player
+ * Unified options with theme toggling, go to artist, liked songs, queue actions, and lyrics.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun NowPlayingOptionsModal(
+    track: AuraTrack,
+    currentStyle: NowPlayingStyle,
+    isFavorite: Boolean,
+    modalContainerColor: Color,
+    onDismiss: () -> Unit,
+    onToggleTheme: () -> Unit,
+    onGoToArtist: () -> Unit,
+    onToggleFavorite: () -> Unit,
+    onPlayNext: () -> Unit,
+    onAddToQueue: () -> Unit,
+    onOpenQueue: () -> Unit,
+    onOpenLyrics: () -> Unit
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = modalContainerColor,
+        dragHandle = {
+            Surface(
+                modifier = Modifier.padding(vertical = 10.dp),
+                color = Color.White.copy(alpha = 0.20f),
+                shape = RoundedCornerShape(4.dp)
+            ) {
+                Spacer(modifier = Modifier.size(width = 36.dp, height = 4.dp))
+            }
+        }
+    ) {
+        com.auramusic.app.ui.components.ForceWhiteSystemBarsEffect()
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 22.dp, vertical = 6.dp)
+        ) {
+            // Header preview
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 14.dp)
+            ) {
+                AsyncImage(
+                    model = track.highResArtworkUrl,
+                    contentDescription = track.title,
+                    modifier = Modifier
+                        .size(50.dp)
+                        .clip(RoundedCornerShape(8.dp)),
+                    contentScale = ContentScale.Crop
+                )
+                Spacer(modifier = Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = track.title,
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 15.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = track.artist,
+                        color = TextSecondary,
+                        fontSize = 12.5.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+
+            HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.5.dp)
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // 1. Toggle Theme Option
+            val nextThemeLabel = if (currentStyle == NowPlayingStyle.SPOTIFY) "Blur - Liquid Glass" else "Spotify Encore"
+            NowPlayingModalOptionRow(
+                icon = Icons.Rounded.Palette,
+                label = "Switch Theme to $nextThemeLabel",
+                iconTint = AuraNeonLime,
+                onClick = onToggleTheme
+            )
+
+            // 2. Go to Artist Screen
+            NowPlayingModalOptionRow(
+                icon = Icons.Rounded.Person,
+                label = "View Artist • ${track.artist}",
+                onClick = onGoToArtist
+            )
+
+            // 3. Favorite / Liked Songs
+            NowPlayingModalOptionRow(
+                icon = if (isFavorite) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
+                label = if (isFavorite) "Remove from Liked Songs" else "Add to Liked Songs",
+                iconTint = if (isFavorite) Color(0xFFFF4081) else Color.White.copy(alpha = 0.85f),
+                onClick = onToggleFavorite
+            )
+
+            // 4. Play Next
+            NowPlayingModalOptionRow(
+                icon = Icons.AutoMirrored.Rounded.QueueMusic,
+                label = "Play Next",
+                onClick = onPlayNext
+            )
+
+            // 5. Add to Queue
+            NowPlayingModalOptionRow(
+                icon = Icons.Rounded.PlaylistAdd,
+                label = "Add to Queue",
+                onClick = onAddToQueue
+            )
+
+            // 6. View Queue
+            NowPlayingModalOptionRow(
+                icon = Icons.AutoMirrored.Rounded.QueueMusic,
+                label = "Upcoming Queue",
+                onClick = onOpenQueue
+            )
+
+            // 7. Full Screen Lyrics
+            NowPlayingModalOptionRow(
+                icon = Icons.AutoMirrored.Rounded.Comment,
+                label = "Lyrics View",
+                onClick = onOpenLyrics
+            )
+
+            Spacer(modifier = Modifier.height(24.dp))
+        }
+    }
+}
+
+@Composable
+private fun NowPlayingModalOptionRow(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    iconTint: Color = Color.White.copy(alpha = 0.85f),
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .clickable(onClick = onClick)
+            .padding(vertical = 11.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = iconTint,
+            modifier = Modifier.size(22.dp)
+        )
+        Spacer(modifier = Modifier.width(16.dp))
+        Text(
+            text = label,
+            color = Color.White,
+            fontWeight = FontWeight.Medium,
+            fontSize = 14.5.sp
+        )
     }
 }
 
@@ -385,6 +846,7 @@ private fun LiquidGlassPlayerView(
     durationSec: Float,
     isFavorite: Boolean,
     isShuffleEnabled: Boolean,
+    lyricsExpansionProgress: Float = 0f,
     onCollapse: () -> Unit,
     onTogglePlayPause: () -> Unit,
     onSeekTo: (Float) -> Unit,
@@ -392,9 +854,11 @@ private fun LiquidGlassPlayerView(
     onSkipPrevious: () -> Unit,
     onToggleFavorite: () -> Unit,
     onToggleShuffle: () -> Unit,
-    onToggleStyle: () -> Unit,
+    onOpenArtist: () -> Unit,
+    onOptionsClick: () -> Unit,
     onOpenLyrics: () -> Unit,
-    onOpenQueue: () -> Unit
+    onOpenQueue: () -> Unit,
+    onCardPositioned: (Rect) -> Unit = {}
 ) {
     val context = LocalContext.current
     val audioManager = remember { context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager }
@@ -404,7 +868,6 @@ private fun LiquidGlassPlayerView(
             audioManager?.let { it.getStreamVolume(AudioManager.STREAM_MUSIC).toFloat() / maxVol.coerceAtLeast(1) } ?: 0.65f
         )
     }
-    var showMenu by remember { mutableStateOf(false) }
 
     // Fully opaque solid black background
     Box(
@@ -443,27 +906,11 @@ private fun LiquidGlassPlayerView(
                 .statusBarsPadding()
                 .navigationBarsPadding()
         ) {
-            // Subtle Apple-style top drag handle pill
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 8.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Box(
-                    modifier = Modifier
-                        .width(38.dp)
-                        .height(4.5.dp)
-                        .clip(CircleShape)
-                        .background(Color.White.copy(alpha = 0.45f))
-                )
-            }
-
-            // Top Bar: Collapse, Style Switcher Chip, More Options Menu
+            // Top Bar: Collapse, Playing from Header, and More Options Menu
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 6.dp),
+                    .padding(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 8.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -476,65 +923,59 @@ private fun LiquidGlassPlayerView(
                     )
                 }
 
-                // Interactive Style Switcher Pill: Tap to transform styles
-                Surface(
-                    shape = RoundedCornerShape(16.dp),
-                    color = Color.White.copy(alpha = 0.16f),
-                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.28f)),
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
                     modifier = Modifier
-                        .clip(RoundedCornerShape(16.dp))
-                        .clickable(onClick = onToggleStyle)
+                        .weight(1f)
+                        .padding(horizontal = 8.dp)
                 ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "✦ Blur Glass",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White,
-                            letterSpacing = 0.4.sp
-                        )
+                    val playingFrom = if (track.album.isNotBlank() && track.album != track.title) {
+                        "Playing from ${track.album}"
+                    } else {
+                        "Playing from Playlist"
                     }
+                    Text(
+                        text = playingFrom,
+                        fontSize = 10.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White.copy(alpha = 0.7f),
+                        letterSpacing = 0.5.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = track.title,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
                 }
 
-                Box {
-                    IconButton(onClick = { showMenu = true }, modifier = Modifier.size(36.dp)) {
-                        Icon(
-                            imageVector = Icons.Rounded.MoreVert,
-                            contentDescription = "More",
-                            tint = Color.White,
-                            modifier = Modifier.size(22.dp)
-                        )
-                    }
-
-                    DropdownMenu(
-                        expanded = showMenu,
-                        onDismissRequest = { showMenu = false },
-                        modifier = Modifier.background(SpotifyCard)
-                    ) {
-                        DropdownMenuItem(
-                            text = { Text("Switch to Spotify Style", color = TextPrimary) },
-                            onClick = {
-                                showMenu = false
-                                onToggleStyle()
-                            }
-                        )
-                    }
+                IconButton(onClick = onOptionsClick, modifier = Modifier.size(36.dp)) {
+                    Icon(
+                        imageVector = Icons.Rounded.MoreVert,
+                        contentDescription = "More",
+                        tint = Color.White,
+                        modifier = Modifier.size(22.dp)
+                    )
                 }
             }
 
-            // 2. High Quality Artwork with increased dimensions adapting dynamically without pushing controls off-screen
+            Spacer(modifier = Modifier.height(14.dp))
+
+            // 2. High Quality Artwork with generous, balanced breathing room
             BoxWithConstraints(
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f)
-                    .padding(horizontal = 20.dp, vertical = 6.dp),
+                    .padding(start = 24.dp, end = 24.dp, top = 8.dp, bottom = 12.dp),
                 contentAlignment = Alignment.Center
             ) {
                 // Dynamically maximize size while fitting within available vertical & horizontal bounds
-                val artSize = minOf(maxHeight - 6.dp, maxWidth).coerceIn(200.dp, 360.dp)
+                val artSize = minOf(maxHeight, maxWidth)
 
                 Box(
                     modifier = Modifier
@@ -573,7 +1014,7 @@ private fun LiquidGlassPlayerView(
                 color = Color.White.copy(alpha = 0.10f),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 4.dp)
+                    .padding(horizontal = 12.dp, vertical = 2.dp)
             ) {
                 Column(
                     modifier = Modifier
@@ -606,7 +1047,10 @@ private fun LiquidGlassPlayerView(
                                 color = Color.White.copy(alpha = 0.65f),
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
-                                letterSpacing = 0.6.sp
+                                letterSpacing = 0.6.sp,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .clickable(onClick = onOpenArtist)
                             )
                         }
 
@@ -631,7 +1075,7 @@ private fun LiquidGlassPlayerView(
                                     modifier = Modifier.size(22.dp)
                                 )
                             }
-                            IconButton(onClick = { showMenu = true }, modifier = Modifier.size(34.dp)) {
+                            IconButton(onClick = onOptionsClick, modifier = Modifier.size(34.dp)) {
                                 Icon(
                                     imageVector = Icons.Rounded.MoreVert,
                                     contentDescription = "More",
@@ -864,6 +1308,7 @@ private fun SpotifyEncorePlayerView(
     lyricsOffsetMs: Int,
     isFavorite: Boolean,
     isShuffleEnabled: Boolean,
+    lyricsExpansionProgress: Float = 0f,
     onCollapse: () -> Unit,
     onTogglePlayPause: () -> Unit,
     onSeekTo: (Float) -> Unit,
@@ -871,9 +1316,11 @@ private fun SpotifyEncorePlayerView(
     onSkipPrevious: () -> Unit,
     onToggleFavorite: () -> Unit,
     onToggleShuffle: () -> Unit,
-    onToggleStyle: () -> Unit,
+    onOpenArtist: () -> Unit,
+    onOptionsClick: () -> Unit,
     onOpenLyrics: () -> Unit,
-    onOpenQueue: () -> Unit
+    onOpenQueue: () -> Unit,
+    onCardPositioned: (Rect) -> Unit = {}
 ) {
     val animatedTopColor by animateColorAsState(
         targetValue = palette.backgroundTop.copy(alpha = 0.65f),
@@ -882,7 +1329,6 @@ private fun SpotifyEncorePlayerView(
     )
 
     val scrollState = rememberScrollState()
-    var showMenu by remember { mutableStateOf(false) }
 
     // Authentic Spotify dynamic gradient background (ambient artwork glow into pure deep obsidian black)
     Box(
@@ -926,17 +1372,27 @@ private fun SpotifyEncorePlayerView(
                     )
                 }
 
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier.weight(1f).padding(horizontal = 8.dp)
+                ) {
+                    val playingFrom = if (track.album.isNotBlank() && track.album != track.title) {
+                        "PLAYING FROM ${track.album.uppercase()}"
+                    } else {
+                        "PLAYING FROM PLAYLIST"
+                    }
                     Text(
-                        text = "PLAYING FROM PLAYLIST",
+                        text = playingFrom,
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Bold,
                         color = Color.White.copy(alpha = 0.7f),
-                        letterSpacing = 0.8.sp
+                        letterSpacing = 0.8.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                     Spacer(modifier = Modifier.height(1.dp))
                     Text(
-                        text = track.album.ifBlank { "Top Tracks" },
+                        text = track.title,
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
                         color = Color.White,
@@ -945,46 +1401,16 @@ private fun SpotifyEncorePlayerView(
                     )
                 }
 
-                Box {
-                    IconButton(
-                        onClick = { showMenu = true },
-                        modifier = Modifier.size(38.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.MoreVert,
-                            contentDescription = "More Options",
-                            tint = Color.White,
-                            modifier = Modifier.size(24.dp)
-                        )
-                    }
-
-                    DropdownMenu(
-                        expanded = showMenu,
-                        onDismissRequest = { showMenu = false },
-                        modifier = Modifier.background(Color(0xFF282828))
-                    ) {
-                        DropdownMenuItem(
-                            text = { Text("Toggle Liquid Glass Style", color = Color.White) },
-                            onClick = {
-                                showMenu = false
-                                onToggleStyle()
-                            }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Upcoming Queue", color = Color.White) },
-                            onClick = {
-                                showMenu = false
-                                onOpenQueue()
-                            }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Full Screen Lyrics", color = Color.White) },
-                            onClick = {
-                                showMenu = false
-                                onOpenLyrics()
-                            }
-                        )
-                    }
+                IconButton(
+                    onClick = onOptionsClick,
+                    modifier = Modifier.size(38.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.MoreVert,
+                        contentDescription = "More Options",
+                        tint = Color.White,
+                        modifier = Modifier.size(24.dp)
+                    )
                 }
             }
 
@@ -1039,7 +1465,10 @@ private fun SpotifyEncorePlayerView(
                         style = MaterialTheme.typography.bodyMedium.copy(fontSize = 15.sp),
                         color = Color.White.copy(alpha = 0.7f),
                         maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(4.dp))
+                            .clickable(onClick = onOpenArtist)
                     )
                 }
 
@@ -1197,6 +1626,14 @@ private fun SpotifyEncorePlayerView(
                     .fillMaxWidth()
                     .heightIn(min = 280.dp)
                     .clip(RoundedCornerShape(20.dp))
+                    .onGloballyPositioned { coordinates ->
+                        onCardPositioned(coordinates.boundsInRoot())
+                    }
+                    .graphicsLayer {
+                        // When lyrics is expanding or in flight, smoothly hide static card underneath
+                        // so the flying morph surface appears as the single continuous shared element
+                        alpha = if (lyricsExpansionProgress > 0.05f) 0f else (1f - (lyricsExpansionProgress / 0.05f)).coerceIn(0f, 1f)
+                    }
                     .clickable(onClick = onOpenLyrics)
             ) {
                 Column(
@@ -1236,82 +1673,91 @@ private fun SpotifyEncorePlayerView(
 
                     Spacer(modifier = Modifier.height(16.dp))
 
-                    val lines = lyrics?.syncedLines ?: emptyList()
-                    val effectiveSec = positionSec + (lyricsOffsetMs / 1000f)
-                    val activeIdx = lines.indexOfLast { effectiveSec >= it.timeSec }.coerceAtLeast(0)
+                    val previewTextAlpha = if (lyricsExpansionProgress > 0.05f) 0f else (1f - (lyricsExpansionProgress / 0.05f)).coerceIn(0f, 1f)
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .graphicsLayer { alpha = previewTextAlpha }
+                    ) {
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            val lines = lyrics?.syncedLines ?: emptyList()
+                            val effectiveSec = positionSec + (lyricsOffsetMs / 1000f)
+                            val activeIdx = lines.indexOfLast { effectiveSec >= it.timeSec }.coerceAtLeast(0)
 
-                    if (lines.isEmpty()) {
-                        Text(
-                            text = SimpMusicLyricsRepository.unescapeLyricsHtml(
-                                lyrics?.plainLyrics?.take(180)?.ifBlank { "Tap to view lyrics" }
-                                    ?: "Tap to view lyrics"
-                            ),
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = Color.White.copy(alpha = 0.85f),
-                            lineHeight = 24.sp,
-                            maxLines = 6
-                        )
-                    } else {
-                        val prevPrev = lines.getOrNull(activeIdx - 2)
-                        val prev = lines.getOrNull(activeIdx - 1)
-                        val current = lines.getOrNull(activeIdx)
-                        val next1 = lines.getOrNull(activeIdx + 1)
-                        val next2 = lines.getOrNull(activeIdx + 2)
+                            if (lines.isEmpty()) {
+                                Text(
+                                    text = SimpMusicLyricsRepository.unescapeLyricsHtml(
+                                        lyrics?.plainLyrics?.take(180)?.ifBlank { "Tap to view lyrics" }
+                                            ?: "Tap to view lyrics"
+                                    ),
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = Color.White.copy(alpha = 0.85f),
+                                    lineHeight = 24.sp,
+                                    maxLines = 6
+                                )
+                            } else {
+                                val prevPrev = lines.getOrNull(activeIdx - 2)
+                                val prev = lines.getOrNull(activeIdx - 1)
+                                val current = lines.getOrNull(activeIdx)
+                                val next1 = lines.getOrNull(activeIdx + 1)
+                                val next2 = lines.getOrNull(activeIdx + 2)
 
-                        if (prevPrev != null) {
-                            Text(
-                                text = SimpMusicLyricsRepository.unescapeLyricsHtml(prevPrev.text),
-                                fontSize = 14.sp,
-                                color = Color.White.copy(alpha = 0.35f),
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Spacer(modifier = Modifier.height(6.dp))
-                        }
+                                if (prevPrev != null) {
+                                    Text(
+                                        text = SimpMusicLyricsRepository.unescapeLyricsHtml(prevPrev.text),
+                                        fontSize = 14.sp,
+                                        color = Color.White.copy(alpha = 0.35f),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                }
 
-                        if (prev != null) {
-                            Text(
-                                text = SimpMusicLyricsRepository.unescapeLyricsHtml(prev.text),
-                                fontSize = 15.sp,
-                                color = Color.White.copy(alpha = 0.50f),
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Spacer(modifier = Modifier.height(6.dp))
-                        }
+                                if (prev != null) {
+                                    Text(
+                                        text = SimpMusicLyricsRepository.unescapeLyricsHtml(prev.text),
+                                        fontSize = 15.sp,
+                                        color = Color.White.copy(alpha = 0.50f),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                }
 
-                        if (current != null) {
-                            Text(
-                                text = SimpMusicLyricsRepository.unescapeLyricsHtml(current.text),
-                                fontSize = 20.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White,
-                                lineHeight = 28.sp
-                            )
-                            Spacer(modifier = Modifier.height(8.dp))
-                        }
+                                if (current != null) {
+                                    Text(
+                                        text = SimpMusicLyricsRepository.unescapeLyricsHtml(current.text),
+                                        fontSize = 20.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color.White,
+                                        lineHeight = 28.sp
+                                    )
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                }
 
-                        if (next1 != null) {
-                            Text(
-                                text = SimpMusicLyricsRepository.unescapeLyricsHtml(next1.text),
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = Color.White.copy(alpha = 0.55f),
-                                lineHeight = 22.sp
-                            )
-                        }
+                                if (next1 != null) {
+                                    Text(
+                                        text = SimpMusicLyricsRepository.unescapeLyricsHtml(next1.text),
+                                        fontSize = 16.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = Color.White.copy(alpha = 0.55f),
+                                        lineHeight = 22.sp
+                                    )
+                                }
 
-                        if (next2 != null) {
-                            Spacer(modifier = Modifier.height(6.dp))
-                            Text(
-                                text = SimpMusicLyricsRepository.unescapeLyricsHtml(next2.text),
-                                fontSize = 14.sp,
-                                color = Color.White.copy(alpha = 0.35f),
-                                lineHeight = 20.sp,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
+                                if (next2 != null) {
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Text(
+                                        text = SimpMusicLyricsRepository.unescapeLyricsHtml(next2.text),
+                                        fontSize = 14.sp,
+                                        color = Color.White.copy(alpha = 0.35f),
+                                        lineHeight = 20.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -1339,6 +1785,8 @@ private fun FullScreenSongLyricsView(
     lyricsOffsetMs: Int,
     showRomanized: Boolean,
     palette: AuraPalette,
+    showPlayerControls: Boolean = true,
+    lyricsExpansionProgress: Float = 1f,
     onClose: () -> Unit,
     onSeekTo: (Float) -> Unit,
     onTogglePlayPause: () -> Unit,
@@ -1376,10 +1824,21 @@ private fun FullScreenSongLyricsView(
                 .statusBarsPadding()
                 .navigationBarsPadding()
         ) {
-            // Top Bar
+            // Top Bar with tap-to-close & swipe-down-to-close gestures
+            // Smoothly crossfades with Card preview header below 0.35f progress
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .graphicsLayer {
+                        alpha = if (lyricsExpansionProgress < 0.35f) 0f else ((lyricsExpansionProgress - 0.35f) / 0.35f).coerceIn(0f, 1f)
+                    }
+                    .pointerInput(Unit) {
+                        detectVerticalDragGestures { _, dragAmount ->
+                            if (dragAmount > 16f) {
+                                onClose()
+                            }
+                        }
+                    }
                     .padding(horizontal = 20.dp, vertical = 12.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
@@ -1502,127 +1961,134 @@ private fun FullScreenSongLyricsView(
 
             // Compact Track UI Controls inside Full Lyrics View with CompactPointSlider
             // 100% seamless: uses the EXACT same color as the lyrics background (no gray transparent overlay)
-            Surface(
-                color = Color.Transparent,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(
+            // Completely hidden during shrinking back to the lyrics card so only lyrics are present!
+            if (showPlayerControls) {
+                Surface(
+                    color = Color.Transparent,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 24.dp, vertical = 12.dp)
+                        .graphicsLayer {
+                            alpha = ((lyricsExpansionProgress - 0.90f) / 0.10f).coerceIn(0f, 1f)
+                        }
                 ) {
-                    CompactPointSlider(
-                        value = positionSec.coerceIn(0f, durationSec.coerceAtLeast(1f)),
-                        onValueChange = onSeekTo,
-                        valueRange = 0f..durationSec.coerceAtLeast(1f),
-                        pointColor = Color.White,
-                        activeTrackColor = Color.White,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 24.dp, vertical = 12.dp)
                     ) {
-                        Text(
-                            text = formatDuration(positionSec.toInt()),
-                            fontFamily = FontFamily.Monospace,
-                            fontSize = 11.sp,
-                            color = Color.White.copy(alpha = 0.8f)
+                        CompactPointSlider(
+                            value = positionSec.coerceIn(0f, durationSec.coerceAtLeast(1f)),
+                            onValueChange = onSeekTo,
+                            valueRange = 0f..durationSec.coerceAtLeast(1f),
+                            pointColor = Color.White,
+                            activeTrackColor = Color.White,
+                            modifier = Modifier.fillMaxWidth()
                         )
-                        Text(
-                            text = formatDuration(durationSec.toInt()),
-                            fontFamily = FontFamily.Monospace,
-                            fontSize = 11.sp,
-                            color = Color.White.copy(alpha = 0.8f)
-                        )
-                    }
 
-                    Spacer(modifier = Modifier.height(6.dp))
-
-                    val playbackMode by AuraPlayerManager.playbackMode.collectAsState()
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        IconButton(
-                            onClick = { AuraPlayerManager.cyclePlaybackMode() },
-                            modifier = Modifier.size(46.dp)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            val (icon, tint) = when (playbackMode) {
-                                PlaybackMode.NORMAL -> Icons.Rounded.Shuffle to Color.White.copy(alpha = 0.5f)
-                                PlaybackMode.SHUFFLE -> Icons.Rounded.Shuffle to AuraPlayGreen
-                                PlaybackMode.REPEAT_ALL -> Icons.Rounded.Repeat to AuraPlayGreen
-                                PlaybackMode.REPEAT_ONE -> Icons.Rounded.RepeatOne to AuraPlayGreen
-                            }
-                            Icon(
-                                imageVector = icon,
-                                contentDescription = playbackMode.label,
-                                tint = tint,
-                                modifier = Modifier.size(24.dp)
+                            Text(
+                                text = formatDuration(positionSec.toInt()),
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 11.sp,
+                                color = Color.White.copy(alpha = 0.8f)
+                            )
+                            Text(
+                                text = formatDuration(durationSec.toInt()),
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 11.sp,
+                                color = Color.White.copy(alpha = 0.8f)
                             )
                         }
 
-                        IconButton(
-                            onClick = onSkipPrevious,
-                            modifier = Modifier.size(48.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.SkipPrevious,
-                                contentDescription = "Previous Track",
-                                tint = Color.White,
-                                modifier = Modifier.size(32.dp)
-                            )
-                        }
+                        Spacer(modifier = Modifier.height(6.dp))
 
-                        Box(
-                            modifier = Modifier
-                                .size(58.dp)
-                                .clip(CircleShape)
-                                .background(Color.White)
-                                .clickable(onClick = onTogglePlayPause),
-                            contentAlignment = Alignment.Center
+                        val playbackMode by AuraPlayerManager.playbackMode.collectAsState()
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            if (isBuffering) {
-                                CircularProgressIndicator(
-                                    color = Color.Black,
-                                    strokeWidth = 2.5.dp,
+                            IconButton(
+                                onClick = { AuraPlayerManager.cyclePlaybackMode() },
+                                modifier = Modifier.size(46.dp)
+                            ) {
+                                val (icon, tint) = when (playbackMode) {
+                                    PlaybackMode.NORMAL -> Icons.Rounded.Shuffle to Color.White.copy(alpha = 0.5f)
+                                    PlaybackMode.SHUFFLE -> Icons.Rounded.Shuffle to AuraPlayGreen
+                                    PlaybackMode.REPEAT_ALL -> Icons.Rounded.Repeat to AuraPlayGreen
+                                    PlaybackMode.REPEAT_ONE -> Icons.Rounded.RepeatOne to AuraPlayGreen
+                                }
+                                Icon(
+                                    imageVector = icon,
+                                    contentDescription = playbackMode.label,
+                                    tint = tint,
                                     modifier = Modifier.size(24.dp)
                                 )
-                            } else {
+                            }
+
+                            IconButton(
+                                onClick = onSkipPrevious,
+                                modifier = Modifier.size(48.dp)
+                            ) {
                                 Icon(
-                                    imageVector = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                                    contentDescription = if (isPlaying) "Pause" else "Play",
-                                    tint = Color.Black,
+                                    imageVector = Icons.Rounded.SkipPrevious,
+                                    contentDescription = "Previous Track",
+                                    tint = Color.White,
                                     modifier = Modifier.size(32.dp)
                                 )
                             }
-                        }
 
-                        IconButton(
-                            onClick = onSkipNext,
-                            modifier = Modifier.size(48.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.SkipNext,
-                                contentDescription = "Next Track",
-                                tint = Color.White,
-                                modifier = Modifier.size(32.dp)
-                            )
-                        }
+                            Box(
+                                modifier = Modifier
+                                    .size(58.dp)
+                                    .clip(CircleShape)
+                                    .background(Color.White)
+                                    .clickable(onClick = onTogglePlayPause),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (isBuffering) {
+                                    CircularProgressIndicator(
+                                        color = Color.Black,
+                                        strokeWidth = 2.5.dp,
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                } else {
+                                    Icon(
+                                        imageVector = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                                        contentDescription = if (isPlaying) "Pause" else "Play",
+                                        tint = Color.Black,
+                                        modifier = Modifier.size(32.dp)
+                                    )
+                                }
+                            }
 
-                        IconButton(
-                            onClick = onOpenQueue,
-                            modifier = Modifier.size(46.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Rounded.QueueMusic,
-                                contentDescription = "Upcoming Queue",
-                                tint = Color.White.copy(alpha = 0.85f),
-                                modifier = Modifier.size(24.dp)
-                            )
+                            IconButton(
+                                onClick = onSkipNext,
+                                modifier = Modifier.size(48.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.SkipNext,
+                                    contentDescription = "Next Track",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(32.dp)
+                                )
+                            }
+
+                            IconButton(
+                                onClick = onOpenQueue,
+                                modifier = Modifier.size(46.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Rounded.QueueMusic,
+                                    contentDescription = "Upcoming Queue",
+                                    tint = Color.White.copy(alpha = 0.85f),
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            }
                         }
                     }
                 }
@@ -1632,39 +2098,129 @@ private fun FullScreenSongLyricsView(
 }
 
 /**
- * Upcoming Queue Sheet
+ * Upcoming Queue Sheet matching Spotify flat minimalist UX:
+ * - Real Mobile Bottom Sheet Modal anchored to the bottom with full dimming scrim
+ * - Flat transparent list items with zero borders
+ * - Drag to reorder via holding ANY tile OR dragging the handle icon
+ * - Damped spring reorder animation with tactile haptic feedback
+ * - Auto-scroll when dragging near viewport boundaries
  */
 @Composable
 private fun QueueSheetContent(
     currentTrack: AuraTrack,
     queue: List<AuraTrack>,
-    onPlayTrack: (AuraTrack) -> Unit
+    modalContainerColor: Color,
+    onPlayTrack: (AuraTrack) -> Unit,
+    onReorderQueue: (List<AuraTrack>) -> Unit
 ) {
+    val curIdx = queue.indexOfFirst { it.videoId == currentTrack.videoId }
+    val upcomingTracks = remember(queue, currentTrack.videoId) {
+        if (curIdx >= 0 && curIdx < queue.lastIndex) {
+            queue.subList(curIdx + 1, queue.size)
+        } else {
+            queue.filterNot { it.videoId == currentTrack.videoId }
+        }
+    }
+
+    var upcomingList by remember(upcomingTracks) { mutableStateOf(upcomingTracks) }
+
+    // Decoupled UI & Data: List data remains frozen during drag so LazyColumn never re-layouts or scrolls unexpectedly
+    var draggedIndex by remember { mutableStateOf<Int?>(null) }
+    var targetDropIndex by remember { mutableStateOf<Int?>(null) }
+    var dragOffsetY by remember { mutableFloatStateOf(0f) }
+
+    val density = LocalDensity.current
+    val haptics = LocalHapticFeedback.current
+    val coroutineScope = rememberCoroutineScope()
+    val lazyListState = rememberLazyListState()
+    val tileHeightPx = with(density) { 56.dp.toPx() }
+
+    fun startDrag(itemId: String) {
+        val currentIdx = upcomingList.indexOfFirst { (it.videoId.ifBlank { it.id }) == itemId }
+        if (currentIdx < 0) return
+        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+        draggedIndex = currentIdx
+        targetDropIndex = currentIdx
+        dragOffsetY = 0f
+    }
+
+    fun handleDragDelta(deltaY: Float) {
+        val current = draggedIndex ?: return
+        dragOffsetY += deltaY
+
+        val deltaSlots = (dragOffsetY / tileHeightPx).roundToInt()
+        val newTarget = (current + deltaSlots).coerceIn(0, upcomingList.lastIndex)
+        if (newTarget != targetDropIndex) {
+            targetDropIndex = newTarget
+            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+        }
+
+        // Auto-scroll when dragged near top or bottom of viewport
+        val layoutInfo = lazyListState.layoutInfo
+        val visible = layoutInfo.visibleItemsInfo
+        val itemInfo = visible.firstOrNull { it.index == current }
+        if (itemInfo != null) {
+            val viewportHeight = layoutInfo.viewportEndOffset - layoutInfo.viewportStartOffset
+            val topInViewport = itemInfo.offset + dragOffsetY
+            val bottomInViewport = topInViewport + itemInfo.size
+            if (topInViewport < 48f) {
+                coroutineScope.launch {
+                    lazyListState.scrollBy(-18f)
+                }
+            } else if (bottomInViewport > viewportHeight - 48f) {
+                coroutineScope.launch {
+                    lazyListState.scrollBy(18f)
+                }
+            }
+        }
+    }
+
+    fun commitDrop() {
+        val current = draggedIndex
+        val target = targetDropIndex
+        if (current != null && target != null && current != target &&
+            current in upcomingList.indices && target in upcomingList.indices
+        ) {
+            val mutable = upcomingList.toMutableList()
+            val moved = mutable.removeAt(current)
+            mutable.add(target, moved)
+            upcomingList = mutable
+            onReorderQueue(mutable)
+        }
+        draggedIndex = null
+        targetDropIndex = null
+        dragOffsetY = 0f
+    }
+
     Column(
         modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 20.dp, vertical = 10.dp)
+            .fillMaxSize()
+            .padding(horizontal = 20.dp, vertical = 6.dp)
     ) {
         Text(
             text = "Queue",
             style = MaterialTheme.typography.titleLarge,
-            color = TextPrimary
+            fontWeight = FontWeight.Bold,
+            color = Color.White
         )
 
-        Spacer(modifier = Modifier.height(14.dp))
+        Spacer(modifier = Modifier.height(10.dp))
 
         Text(
             text = "NOW PLAYING",
             style = MaterialTheme.typography.labelSmall,
-            color = AuraPlayGreen
+            fontWeight = FontWeight.Bold,
+            color = AuraNeonLime,
+            letterSpacing = 1.sp
         )
 
         Spacer(modifier = Modifier.height(6.dp))
 
+        // Flat "Now Playing" Tile (Zero Border, Flat Transparent Design)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(vertical = 6.dp),
+                .padding(vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             AsyncImage(
@@ -1672,88 +2228,235 @@ private fun QueueSheetContent(
                 contentDescription = currentTrack.title,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier
-                    .size(48.dp)
-                    .clip(RoundedCornerShape(8.dp))
+                    .size(44.dp)
+                    .clip(RoundedCornerShape(6.dp))
             )
             Spacer(modifier = Modifier.width(12.dp))
-            Column {
+            Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = currentTrack.title,
                     fontWeight = FontWeight.Bold,
-                    color = AuraPlayGreen,
-                    fontSize = 14.sp
+                    color = AuraNeonLime,
+                    fontSize = 14.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
+                Spacer(modifier = Modifier.height(2.dp))
                 Text(
                     text = currentTrack.artist,
-                    color = TextSecondary,
-                    fontSize = 12.sp
+                    color = Color.White.copy(alpha = 0.70f),
+                    fontSize = 12.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            Spacer(modifier = Modifier.width(8.dp))
+            Row(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(AuraNeonLime.copy(alpha = 0.15f))
+                    .padding(horizontal = 8.dp, vertical = 3.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.PlayArrow,
+                    contentDescription = null,
+                    tint = AuraNeonLime,
+                    modifier = Modifier.size(12.dp)
+                )
+                Spacer(modifier = Modifier.width(3.dp))
+                Text(
+                    text = "Playing",
+                    color = AuraNeonLime,
+                    fontSize = 10.5.sp,
+                    fontWeight = FontWeight.ExtraBold
                 )
             }
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(12.dp))
 
-        Text(
-            text = "UP NEXT",
-            style = MaterialTheme.typography.labelSmall,
-            color = TextSecondary
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "UP NEXT",
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Bold,
+                color = TextSecondary,
+                letterSpacing = 1.sp
+            )
+            if (upcomingList.isNotEmpty()) {
+                Text(
+                    text = "${upcomingList.size} upcoming",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = TextSecondary,
+                    fontSize = 11.sp
+                )
+            }
+        }
 
-        Spacer(modifier = Modifier.height(6.dp))
+        Spacer(modifier = Modifier.height(4.dp))
 
-        val upcoming = queue.filterNot { it.videoId == currentTrack.videoId }
-        if (upcoming.isEmpty()) {
+        if (upcomingList.isEmpty()) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(vertical = 32.dp),
+                    .weight(1f),
                 contentAlignment = Alignment.Center
             ) {
                 Text(
                     text = "End of queue. Radio songs will load automatically.",
                     style = MaterialTheme.typography.bodyMedium,
-                    color = TextSecondary
+                    color = TextSecondary,
+                    textAlign = TextAlign.Center
                 )
             }
         } else {
             LazyColumn(
-                modifier = Modifier.height(340.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                state = lazyListState,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
+                contentPadding = PaddingValues(bottom = 24.dp)
             ) {
-                items(upcoming, key = { it.videoId }) { item ->
-                    Row(
+                itemsIndexed(
+                    items = upcomingList,
+                    key = { _, item -> item.videoId.ifBlank { item.id } }
+                ) { index, item ->
+                    val itemKey = item.videoId.ifBlank { item.id }
+                    val isDraggingThis = draggedIndex == index
+                    val currentDrag = draggedIndex
+                    val currentTarget = targetDropIndex
+
+                    // Physics engine spring displacement: surrounding items glide out of the way smoothly
+                    val itemDisplacementY by animateFloatAsState(
+                        targetValue = when {
+                            currentDrag == null || currentTarget == null -> 0f
+                            index == currentDrag -> 0f
+                            // Dragging UP: items between currentTarget and currentDrag glide DOWN (+tileHeightPx)
+                            currentDrag > currentTarget && index in currentTarget until currentDrag -> tileHeightPx
+                            // Dragging DOWN: items between currentDrag and currentTarget glide UP (-tileHeightPx)
+                            currentDrag < currentTarget && index in (currentDrag + 1)..currentTarget -> -tileHeightPx
+                            else -> 0f
+                        },
+                        animationSpec = spring(
+                            dampingRatio = Spring.DampingRatioLowBouncy,
+                            stiffness = Spring.StiffnessMediumLow
+                        ),
+                        label = "disp_$index"
+                    )
+
+                    val animatedElevation by animateDpAsState(
+                        targetValue = if (isDraggingThis) 12.dp else 0.dp,
+                        animationSpec = spring(
+                            dampingRatio = Spring.DampingRatioNoBouncy,
+                            stiffness = Spring.StiffnessMedium
+                        ),
+                        label = "elev_$index"
+                    )
+                    val animatedScale by animateFloatAsState(
+                        targetValue = if (isDraggingThis) 1.03f else 1.0f,
+                        animationSpec = spring(
+                            dampingRatio = Spring.DampingRatioNoBouncy,
+                            stiffness = Spring.StiffnessMedium
+                        ),
+                        label = "scale_$index"
+                    )
+
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        // Dragged tile uses SOLID light gray color (not transparent)
+                        color = if (isDraggingThis) Color(0xFF3A3D46) else Color.Transparent,
+                        border = null,
+                        shadowElevation = animatedElevation,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(8.dp))
-                            .clickable { onPlayTrack(item) }
-                            .padding(vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                            .zIndex(if (isDraggingThis) 25f else 1f)
+                            .graphicsLayer {
+                                translationY = if (isDraggingThis) dragOffsetY else itemDisplacementY
+                                scaleX = animatedScale
+                                scaleY = animatedScale
+                            }
+                            // Holding anywhere on the song tile activates drag mode
+                            .pointerInput(itemKey) {
+                                detectDragGesturesAfterLongPress(
+                                    onDragStart = { startDrag(itemKey) },
+                                    onDrag = { change, dragAmount ->
+                                        change.consume()
+                                        handleDragDelta(dragAmount.y)
+                                    },
+                                    onDragEnd = { commitDrop() },
+                                    onDragCancel = { commitDrop() }
+                                )
+                            }
+                            .clickable {
+                                if (draggedIndex == null) {
+                                    onPlayTrack(item)
+                                }
+                            }
                     ) {
-                        AsyncImage(
-                            model = item.highResArtworkUrl,
-                            contentDescription = item.title,
-                            contentScale = ContentScale.Crop,
+                        Row(
                             modifier = Modifier
-                                .size(44.dp)
-                                .clip(RoundedCornerShape(6.dp))
-                        )
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Column {
-                            Text(
-                                text = item.title,
-                                fontWeight = FontWeight.SemiBold,
-                                color = TextPrimary,
-                                fontSize = 13.sp,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
+                                .fillMaxWidth()
+                                .padding(horizontal = 4.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            AsyncImage(
+                                model = item.highResArtworkUrl,
+                                contentDescription = item.title,
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier
+                                    .size(44.dp)
+                                    .clip(RoundedCornerShape(6.dp))
                             )
-                            Text(
-                                text = "${item.artist} • ${formatDuration(item.durationSeconds)}",
-                                color = TextSecondary,
-                                fontSize = 11.sp,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = item.title,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = if (isDraggingThis) AuraNeonLime else Color.White,
+                                    fontSize = 13.5.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = item.artist,
+                                    color = TextSecondary,
+                                    fontSize = 11.5.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(8.dp))
+
+                            // Drag Handle Icon on the right: Immediate touch & drag without waiting for long-press
+                            Box(
+                                modifier = Modifier
+                                    .size(44.dp)
+                                    .pointerInput(itemKey) {
+                                        detectDragGestures(
+                                            onDragStart = { startDrag(itemKey) },
+                                            onDrag = { change, dragAmount ->
+                                                change.consume()
+                                                handleDragDelta(dragAmount.y)
+                                            },
+                                            onDragEnd = { commitDrop() },
+                                            onDragCancel = { commitDrop() }
+                                        )
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.DragHandle,
+                                    contentDescription = "Drag to reorder",
+                                    tint = if (isDraggingThis) AuraNeonLime else Color.White.copy(alpha = 0.45f),
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
                         }
                     }
                 }

@@ -1,8 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <style name="Theme.AuraMusic" parent="Theme.AppCompat.DayNight.NoActionBar">
-        <item name="android:statusBarColor">#0A0B0E</item>
-        <item name="android:navigationBarColor">#0A0B0E</item>
-        <item name="android:windowBackground">#0A0B0E</item>
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <style name="Theme.AuraMusic" parent="Theme.AppCompat.NoActionBar">
+        <item name="android:statusBarColor">#000000</item>
+        <item name="android:navigationBarColor">#000000</item>
+        <item name="android:windowBackground">#000000</item>
+
+        <!-- Force Android status bar header (time, battery, wifi) to ALWAYS be white, never black -->
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+        <item name="android:enforceStatusBarContrast" tools:targetApi="q">false</item>
+        <item name="android:enforceNavigationBarContrast" tools:targetApi="q">false</item>
     </style>
 </resources>

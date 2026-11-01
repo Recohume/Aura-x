@@ -3,6 +3,7 @@ plugins {
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.compose.compiler)
     alias(libs.plugins.kotlin.serialization)
+    alias(libs.plugins.google.services)
 }
 
 android {
@@ -17,15 +18,41 @@ android {
         // Dynamic version code & name: CI build run number or Gradle parameter with local defaults
         val ciVersionCode = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull()
         val propVersionCode = (project.findProperty("versionCode") as? String)?.toIntOrNull()
-        versionCode = propVersionCode ?: ciVersionCode ?: 1
+        versionCode = propVersionCode ?: ciVersionCode ?: 3
 
         val propVersionName = project.findProperty("versionName") as? String
         val envVersionName = System.getenv("APP_VERSION_NAME")
-        versionName = propVersionName ?: envVersionName ?: "1.2"
+        versionName = propVersionName ?: envVersionName ?: "1.3"
 
         vectorDrawables {
             useSupportLibrary = true
         }
+
+        // Read .env file for Supabase subscription pool credentials
+        var supabasePublicUrl = ""
+        var supabaseAnonKey = ""
+        val envFile = rootProject.file(".env")
+        if (envFile.exists()) {
+            envFile.forEachLine { line ->
+                val trimmed = line.trim()
+                if (trimmed.isNotEmpty() && !trimmed.startsWith("#") && trimmed.contains("=")) {
+                    val parts = trimmed.split("=", limit = 2)
+                    val key = parts[0].trim()
+                    val value = parts[1].trim()
+                    if (key == "SUPABASE_PUBLIC_URL") supabasePublicUrl = value
+                    if (key == "SUPABASE_ANON_KEY") supabaseAnonKey = value
+                }
+            }
+        }
+        if (supabasePublicUrl.isEmpty()) {
+            supabasePublicUrl = System.getenv("SUPABASE_PUBLIC_URL") ?: ""
+        }
+        if (supabaseAnonKey.isEmpty()) {
+            supabaseAnonKey = System.getenv("SUPABASE_ANON_KEY") ?: ""
+        }
+
+        buildConfigField("String", "SUPABASE_PUBLIC_URL", "\"$supabasePublicUrl\"")
+        buildConfigField("String", "SUPABASE_ANON_KEY", "\"$supabaseAnonKey\"")
     }
 
     buildTypes {
@@ -50,6 +77,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     packaging {
@@ -112,4 +140,8 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.coroutines.guava)
+
+    // Firebase Cloud Messaging & In-App Push Notifications
+    implementation(platform(libs.firebase.bom))
+    implementation(libs.firebase.messaging)
 }

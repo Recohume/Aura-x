@@ -55,6 +55,9 @@ object AuraPlayerManager {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var progressJob: Job? = null
     private var sleepTimerJob: Job? = null
+    private var radioFetchJob: Job? = null
+    private var fadeJob: Job? = null
+    private var baseVolume: Float = 1.0f
 
     private var appContext: Context? = null
     private var simpleCache: SimpleCache? = null
@@ -69,6 +72,7 @@ object AuraPlayerManager {
 
     private val _queue = MutableStateFlow<List<AuraTrack>>(emptyList())
     val queue: StateFlow<List<AuraTrack>> = _queue.asStateFlow()
+    private var originalQueue: List<AuraTrack> = emptyList()
 
     private val _isPlaying = MutableStateFlow(false)
     val isPlaying: StateFlow<Boolean> = _isPlaying.asStateFlow()
@@ -225,6 +229,8 @@ object AuraPlayerManager {
             }
 
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                fadeJob?.cancel()
+                player.volume = baseVolume
                 val mediaId = mediaItem?.mediaId ?: return
                 val matched = _queue.value.firstOrNull { it.videoId == mediaId }
                 if (matched != null) {
@@ -251,13 +257,39 @@ object AuraPlayerManager {
         startProgressTicker()
     }
 
-    fun playTrack(track: AuraTrack, newQueue: List<AuraTrack>? = null) {
+    fun playTrack(
+        track: AuraTrack,
+        newQueue: List<AuraTrack>? = null,
+        allowRadioQueue: Boolean = _isShuffleEnabled.value && newQueue == null
+    ) {
         val player = exoPlayer ?: return
-        val updatedQueue = when {
-            !newQueue.isNullOrEmpty() -> newQueue
+        radioFetchJob?.cancel()
+
+        val dedupedNewQueue = newQueue?.distinctBy { it.videoId }
+        if (!dedupedNewQueue.isNullOrEmpty()) {
+            originalQueue = dedupedNewQueue
+        } else if (originalQueue.isEmpty()) {
+            originalQueue = _queue.value
+        }
+
+        val baseQueue = when {
+            !dedupedNewQueue.isNullOrEmpty() -> dedupedNewQueue
             _queue.value.any { it.videoId == track.videoId } -> _queue.value
             else -> listOf(track) + _queue.value
         }
+
+        val updatedQueue = if (_isShuffleEnabled.value) {
+            val others = baseQueue.filterNot { it.videoId == track.videoId }.shuffled()
+            listOf(track) + others
+        } else {
+            val idx = baseQueue.indexOfFirst { it.videoId == track.videoId }
+            if (idx >= 0) {
+                baseQueue.subList(idx, baseQueue.size) + baseQueue.subList(0, idx)
+            } else {
+                listOf(track) + baseQueue
+            }
+        }
+
         _queue.value = updatedQueue
         _currentTrack.value = track
         _positionSec.value = 0f
@@ -267,6 +299,9 @@ object AuraPlayerManager {
         val mediaItems = updatedQueue.map { item -> buildMediaItem(item) }
         val startIndex = updatedQueue.indexOfFirst { it.videoId == track.videoId }.coerceAtLeast(0)
 
+        fadeJob?.cancel()
+        player.volume = baseVolume
+        player.shuffleModeEnabled = false // Transparent explicit order
         player.setMediaItems(mediaItems, startIndex, 0L)
         player.prepare()
         player.play()
@@ -281,10 +316,10 @@ object AuraPlayerManager {
             }
         }
 
-        // Proactively pre-warm the next track & fetch radio queue if queue is short
+        // Proactively pre-warm the next track & fetch radio queue only if radio auto-play is permitted
         prefetchUpcomingTracks(track.videoId)
-        if (updatedQueue.size <= 3) {
-            scope.launch {
+        if (allowRadioQueue && updatedQueue.size <= 3) {
+            radioFetchJob = scope.launch {
                 val radio = SimpMusicExtractorEngine.fetchRadioQueue(track.videoId)
                 if (radio.isNotEmpty()) {
                     val existingIds = _queue.value.map { it.videoId }.toSet()
@@ -302,6 +337,7 @@ object AuraPlayerManager {
     fun enqueueTrack(track: AuraTrack) {
         if (_queue.value.none { it.videoId == track.videoId }) {
             _queue.value = _queue.value + track
+            originalQueue = originalQueue + track
             exoPlayer?.addMediaItem(buildMediaItem(track))
         }
     }
@@ -316,15 +352,52 @@ object AuraPlayerManager {
         exoPlayer?.addMediaItem(insertIndex, buildMediaItem(track))
     }
 
+    fun pauseWithFadeOut(onComplete: (() -> Unit)? = null) {
+        val player = exoPlayer ?: return
+        if (!player.isPlaying) return
+        fadeJob?.cancel()
+        fadeJob = scope.launch {
+            val startVol = player.volume
+            val steps = 8
+            val stepDelayMs = 25L // 200ms smooth fade out
+            for (i in steps downTo 0) {
+                if (!isActive) break
+                player.volume = (startVol * (i / steps.toFloat())).coerceIn(0f, 1f)
+                delay(stepDelayMs)
+            }
+            player.pause()
+            player.volume = startVol
+            onComplete?.invoke()
+        }
+    }
+
+    fun playWithFadeIn() {
+        val player = exoPlayer ?: return
+        fadeJob?.cancel()
+        val targetVol = baseVolume
+        if (player.playbackState == Player.STATE_IDLE) {
+            player.prepare()
+        }
+        player.volume = 0f
+        player.play()
+        fadeJob = scope.launch {
+            val steps = 8
+            val stepDelayMs = 25L // 200ms smooth fade in
+            for (i in 1..steps) {
+                if (!isActive) break
+                player.volume = (targetVol * (i / steps.toFloat())).coerceIn(0f, 1f)
+                delay(stepDelayMs)
+            }
+            player.volume = targetVol
+        }
+    }
+
     fun togglePlayPause() {
         val player = exoPlayer ?: return
         if (player.isPlaying) {
-            player.pause()
+            pauseWithFadeOut()
         } else {
-            if (player.playbackState == Player.STATE_IDLE) {
-                player.prepare()
-            }
-            player.play()
+            playWithFadeIn()
         }
     }
 
@@ -342,16 +415,19 @@ object AuraPlayerManager {
                     player.shuffleModeEnabled = false
                     player.repeatMode = Player.REPEAT_MODE_OFF
                     _isShuffleEnabled.value = false
+                    restoreOriginalQueue()
                 }
                 PlaybackMode.SHUFFLE -> {
-                    player.shuffleModeEnabled = true
+                    player.shuffleModeEnabled = false
                     player.repeatMode = Player.REPEAT_MODE_OFF
                     _isShuffleEnabled.value = true
+                    shuffleUpcomingQueue()
                 }
                 PlaybackMode.REPEAT_ALL -> {
                     player.shuffleModeEnabled = false
                     player.repeatMode = Player.REPEAT_MODE_ALL
                     _isShuffleEnabled.value = false
+                    restoreOriginalQueue()
                 }
                 PlaybackMode.REPEAT_ONE -> {
                     player.shuffleModeEnabled = false
@@ -367,8 +443,86 @@ object AuraPlayerManager {
         cyclePlaybackMode()
     }
 
+    fun shuffleUpcomingQueue() {
+        val cur = _currentTrack.value ?: return
+        val list = _queue.value
+        if (list.size <= 1) {
+            // Queue only has 1 song (e.g. played single search track), and user activated Shuffle mode!
+            // Dynamically fetch radio queue so playback auto-plays into similar tracks
+            scope.launch {
+                val radio = SimpMusicExtractorEngine.fetchRadioQueue(cur.videoId)
+                if (radio.isNotEmpty()) {
+                    val existingIds = _queue.value.map { it.videoId }.toSet()
+                    val fresh = radio.filterNot { existingIds.contains(it.videoId) }
+                    if (fresh.isNotEmpty()) {
+                        _queue.value = _queue.value + fresh
+                        exoPlayer?.addMediaItems(fresh.map { buildMediaItem(it) })
+                        fresh.firstOrNull()?.let { SimpMusicExtractorEngine.prefetchStream(it.videoId) }
+                    }
+                }
+            }
+            return
+        }
+        if (originalQueue.isEmpty() || originalQueue.size != list.size) {
+            originalQueue = list
+        }
+        val curIdx = list.indexOfFirst { it.videoId == cur.videoId }
+        val before = if (curIdx >= 0) list.take(curIdx + 1) else listOf(cur)
+        val after = if (curIdx >= 0) list.drop(curIdx + 1).shuffled() else list.filterNot { it.videoId == cur.videoId }.shuffled()
+        val newOrder = before + after
+        _queue.value = newOrder
+        syncPlayerPlaylist(newOrder, curIdx.coerceAtLeast(0))
+    }
+
+    fun restoreOriginalQueue() {
+        if (originalQueue.isEmpty()) return
+        val cur = _currentTrack.value ?: return
+        val origIdx = originalQueue.indexOfFirst { it.videoId == cur.videoId }
+        if (origIdx >= 0) {
+            _queue.value = originalQueue
+            syncPlayerPlaylist(originalQueue, origIdx)
+        }
+    }
+
+    fun updateUpcomingQueue(newUpcomingList: List<AuraTrack>) {
+        val cur = _currentTrack.value ?: return
+        val list = _queue.value
+        val curIdx = list.indexOfFirst { it.videoId == cur.videoId }
+        val before = if (curIdx >= 0) list.take(curIdx + 1) else listOf(cur)
+        val updated = before + newUpcomingList
+        _queue.value = updated
+
+        // Seamlessly sync ExoPlayer's upcoming items WITHOUT calling setMediaItems (which pauses audio)
+        val player = exoPlayer ?: return
+        try {
+            val playerCurIdx = player.currentMediaItemIndex
+            val totalItems = player.mediaItemCount
+            // Safely remove only upcoming items that follow the active playing track
+            if (totalItems > playerCurIdx + 1) {
+                player.removeMediaItems(playerCurIdx + 1, totalItems)
+            }
+            // Append newly reordered upcoming items to the end of the timeline
+            val newMediaItems = newUpcomingList.map { buildMediaItem(it) }
+            if (newMediaItems.isNotEmpty()) {
+                player.addMediaItems(newMediaItems)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Non-critical error updating upcoming items in player: ${e.message}")
+        }
+    }
+
+    private fun syncPlayerPlaylist(newList: List<AuraTrack>, currentIndex: Int) {
+        val player = exoPlayer ?: return
+        val currentPosition = player.currentPosition
+        val isCurrentlyPlaying = player.isPlaying
+        player.setMediaItems(newList.map { buildMediaItem(it) }, currentIndex, currentPosition)
+        if (isCurrentlyPlaying) player.play()
+    }
+
     fun seekToSeconds(seconds: Float) {
         val player = exoPlayer ?: return
+        fadeJob?.cancel()
+        player.volume = baseVolume
         val targetMs = (seconds.coerceAtLeast(0f) * 1000f).toLong()
         player.seekTo(targetMs)
         _positionSec.value = seconds.coerceAtLeast(0f)
@@ -376,6 +530,8 @@ object AuraPlayerManager {
 
     fun skipToNext() {
         val player = exoPlayer ?: return
+        fadeJob?.cancel()
+        player.volume = baseVolume
         if (player.hasNextMediaItem()) {
             player.seekToNextMediaItem()
             player.play()
@@ -384,15 +540,17 @@ object AuraPlayerManager {
             val currentId = _currentTrack.value?.videoId
             val idx = list.indexOfFirst { it.videoId == currentId }
             if (idx in 0 until list.lastIndex) {
-                playTrack(list[idx + 1], list)
-            } else if (list.isNotEmpty()) {
-                playTrack(list.first(), list)
+                playTrack(list[idx + 1], list, allowRadioQueue = _isShuffleEnabled.value)
+            } else if (list.isNotEmpty() && player.repeatMode == Player.REPEAT_MODE_ALL) {
+                playTrack(list.first(), list, allowRadioQueue = _isShuffleEnabled.value)
             }
         }
     }
 
     fun skipToPrevious() {
         val player = exoPlayer ?: return
+        fadeJob?.cancel()
+        player.volume = baseVolume
         if (_positionSec.value > 4f) {
             seekToSeconds(0f)
             return
@@ -405,7 +563,7 @@ object AuraPlayerManager {
             val currentId = _currentTrack.value?.videoId
             val idx = list.indexOfFirst { it.videoId == currentId }
             if (idx > 0) {
-                playTrack(list[idx - 1], list)
+                playTrack(list[idx - 1], list, allowRadioQueue = _isShuffleEnabled.value)
             } else {
                 seekToSeconds(0f)
             }
@@ -559,7 +717,10 @@ object AuraPlayerManager {
         }
 
         val gain = if (enabled) preset.preampGain else 1.0f
-        player.volume = gain.coerceIn(0.2f, 1.0f)
+        baseVolume = gain.coerceIn(0.2f, 1.0f)
+        if (fadeJob?.isActive != true) {
+            player.volume = baseVolume
+        }
     }
 
     private fun startProgressTicker() {
@@ -574,6 +735,15 @@ object AuraPlayerManager {
                     val durMs = player.duration
                     if (durMs > 0 && durMs != C.TIME_UNSET) {
                         _durationSec.value = (durMs / 1000f).coerceAtLeast(1f)
+
+                        // Smooth audio fade out effect when the song is finishing (last 2 seconds)
+                        val remainingMs = durMs - player.currentPosition
+                        if (remainingMs in 50L..2000L && fadeJob?.isActive != true) {
+                            val fadeFactor = (remainingMs / 2000f).coerceIn(0f, 1f)
+                            player.volume = (baseVolume * fadeFactor).coerceIn(0f, 1f)
+                        } else if (remainingMs > 2000L && fadeJob?.isActive != true && player.volume < baseVolume) {
+                            player.volume = baseVolume
+                        }
                     }
 
                     // SponsorBlock real-time auto-skip check

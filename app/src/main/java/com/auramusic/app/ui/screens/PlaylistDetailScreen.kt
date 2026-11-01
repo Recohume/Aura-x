@@ -5,6 +5,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -27,12 +28,15 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.QueueMusic
+import androidx.compose.material.icons.rounded.ArrowDownward
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
+import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.LibraryAdd
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.PlaylistAdd
+import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -45,6 +49,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -88,6 +93,7 @@ fun PlaylistDetailScreen(
     val allTracks = remember(playlistDetail.tracks) {
         playlistDetail.tracks.map { it.track }
     }
+    var visibleTrackCount by remember(playlistDetail.tracks) { mutableIntStateOf(20) }
 
     BackHandler {
         onClose()
@@ -177,11 +183,23 @@ fun PlaylistDetailScreen(
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
+                        if (playlistDetail.totalViews.isNotBlank()) {
+                            Spacer(modifier = Modifier.height(3.dp))
+                            Text(
+                                text = playlistDetail.totalViews,
+                                color = AuraNeonLime,
+                                fontSize = 12.5.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                textAlign = TextAlign.End,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
                     }
                 }
             }
 
-            // 2. Section Header: Songs count & Quick Play All
+            // 2. Section Header: Songs count, Total Views & Quick Play All + Shuffle
             item {
                 Row(
                     modifier = Modifier
@@ -192,60 +210,89 @@ fun PlaylistDetailScreen(
                 ) {
                     Column {
                         Text(
-                            text = "Playlist Tracks",
+                            text = "Tracks",
                             color = Color.White,
                             fontWeight = FontWeight.Bold,
                             fontSize = 18.sp
                         )
+                        val subtitleText = buildString {
+                            if (playlistDetail.tracks.isNotEmpty()) {
+                                append("${playlistDetail.tracks.size} tracks")
+                            } else {
+                                append(playlistDetail.trackCount)
+                            }
+                            if (playlistDetail.totalViews.isNotBlank()) {
+                                append(" • ${playlistDetail.totalViews}")
+                            }
+                        }
                         Text(
-                            text = if (playlistDetail.tracks.isNotEmpty()) "${playlistDetail.tracks.size} tracks available" else playlistDetail.trackCount,
+                            text = subtitleText,
                             color = TextSecondary,
                             fontSize = 12.sp
                         )
                     }
 
                     if (allTracks.isNotEmpty()) {
-                        Surface(
-                            shape = CircleShape,
-                            color = Color.White,
-                            modifier = Modifier
-                                .size(44.dp)
-                                .clip(CircleShape)
-                                .clickable { onPlayTrack(allTracks.first(), allTracks) }
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(
-                                    imageVector = Icons.Rounded.PlayArrow,
-                                    contentDescription = "Play Playlist",
-                                    tint = Color.Black,
-                                    modifier = Modifier.size(26.dp)
-                                )
+                            // Shuffle Button
+                            Surface(
+                                shape = CircleShape,
+                                color = Color(0xFF1E2028),
+                                border = BorderStroke(1.dp, Color(0xFF2E323D)),
+                                modifier = Modifier
+                                    .size(42.dp)
+                                    .clip(CircleShape)
+                                    .clickable {
+                                        val shuffled = allTracks.shuffled()
+                                        onPlayTrack(shuffled.first(), shuffled)
+                                    }
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Shuffle,
+                                        contentDescription = "Shuffle Playlist",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                            }
+
+                            // Play All Button
+                            Surface(
+                                shape = CircleShape,
+                                color = AuraNeonLime,
+                                modifier = Modifier
+                                    .size(44.dp)
+                                    .clip(CircleShape)
+                                    .clickable { onPlayTrack(allTracks.first(), allTracks) }
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.PlayArrow,
+                                        contentDescription = "Play Playlist",
+                                        tint = Color.Black,
+                                        modifier = Modifier.size(26.dp)
+                                    )
+                                }
                             }
                         }
                     }
                 }
             }
 
-            // 3. Loading indicator
+            // 3. Loading indicator / Skeleton Loading
             if (isLoading && playlistDetail.tracks.isEmpty()) {
-                item {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 40.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        CircularProgressIndicator(
-                            color = Color.White.copy(alpha = 0.8f),
-                            strokeWidth = 2.dp,
-                            modifier = Modifier.size(32.dp)
-                        )
-                    }
+                items(6) {
+                    com.auramusic.app.ui.components.TrackItemSkeleton()
                 }
             }
 
-            // 4. Ranked Song List (1..N) with Album Art, Title, Views/Duration, and 3-Dot options
-            items(playlistDetail.tracks, key = { "pl_song_${it.rank}_${it.track.videoId}" }) { item ->
+            // 4. Ranked Song List (1..N) with Album Art, Title, Views/Duration, and 3-Dot options (Paginated)
+            val paginatedTracks = playlistDetail.tracks.take(visibleTrackCount)
+            items(paginatedTracks, key = { "pl_song_${it.rank}_${it.track.videoId}" }) { item ->
                 val isCurrent = item.track.videoId == currentPlayingId
 
                 Row(
@@ -300,10 +347,12 @@ fun PlaylistDetailScreen(
                                 modifier = Modifier.weight(1f, fill = false)
                             )
                             if (item.viewCount.isNotBlank()) {
+                                val isMetric = item.viewCount.contains("play", ignoreCase = true) || item.viewCount.contains("view", ignoreCase = true)
                                 Text(
                                     text = " • ${item.viewCount}",
-                                    color = TextSecondary.copy(alpha = 0.75f),
+                                    color = if (isMetric) AuraNeonLime.copy(alpha = 0.90f) else TextSecondary.copy(alpha = 0.75f),
                                     fontSize = 11.sp,
+                                    fontWeight = if (isMetric) FontWeight.SemiBold else FontWeight.Normal,
                                     maxLines = 1
                                 )
                             }
@@ -324,6 +373,48 @@ fun PlaylistDetailScreen(
                     }
                 }
             }
+
+            // Pagination "See More" button for large / TOP 100 playlists
+            if (visibleTrackCount < playlistDetail.tracks.size) {
+                item {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 20.dp, vertical = 14.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(24.dp),
+                            color = Color(0xFF1E2028),
+                            border = BorderStroke(1.dp, Color(0xFF2E323D)),
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(24.dp))
+                                .clickable {
+                                    visibleTrackCount = (visibleTrackCount + 20).coerceAtMost(playlistDetail.tracks.size)
+                                }
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 24.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.ArrowDownward,
+                                    contentDescription = "See More",
+                                    tint = AuraNeonLime,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "See More Tracks (${playlistDetail.tracks.size - visibleTrackCount} remaining)",
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.sp
+                                )
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         // 5. Options Modal Bottom Sheet
@@ -334,6 +425,7 @@ fun PlaylistDetailScreen(
                 containerColor = Color(0xFF14161E),
                 scrimColor = Color.Black.copy(alpha = 0.75f)
             ) {
+                com.auramusic.app.ui.components.ForceWhiteSystemBarsEffect()
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()

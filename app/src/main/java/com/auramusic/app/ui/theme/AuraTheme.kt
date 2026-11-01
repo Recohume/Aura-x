@@ -109,6 +109,7 @@ val AuraTypography = Typography(
 
 @Composable
 fun AuraMusicTheme(content: @Composable () -> Unit) {
+    com.auramusic.app.ui.components.ForceWhiteSystemBarsEffect()
     MaterialTheme(
         colorScheme = AuraDarkScheme,
         typography = AuraTypography,

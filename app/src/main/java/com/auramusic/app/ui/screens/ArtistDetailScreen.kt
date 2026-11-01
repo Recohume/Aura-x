@@ -5,6 +5,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -21,6 +22,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -31,8 +33,8 @@ import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.LibraryAdd
 import androidx.compose.material.icons.rounded.MoreVert
+import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.PlaylistAdd
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -62,8 +64,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.auramusic.app.core.media.AuraPlayerManager
+import com.auramusic.app.domain.model.ArtistCarouselItem
 import com.auramusic.app.domain.model.ArtistDetail
 import com.auramusic.app.domain.model.AuraTrack
+import com.auramusic.app.ui.components.AlbumCarouselSkeleton
+import com.auramusic.app.ui.components.ArtistCarouselSkeleton
+import com.auramusic.app.ui.components.TrackItemSkeleton
+import com.auramusic.app.ui.components.auraShimmer
 import com.auramusic.app.ui.theme.AuraNeonLime
 import com.auramusic.app.ui.theme.SpotifyPitchBlack
 import com.auramusic.app.ui.theme.TextPrimary
@@ -77,10 +84,13 @@ fun ArtistDetailScreen(
     currentPlayingId: String?,
     onClose: () -> Unit,
     onPlayTrack: (AuraTrack, List<AuraTrack>) -> Unit,
-    onToggleFavorite: (AuraTrack) -> Unit
+    onToggleFavorite: (AuraTrack) -> Unit,
+    onOpenArtist: (String) -> Unit = {},
+    onOpenPlaylist: (ArtistCarouselItem) -> Unit = {}
 ) {
     val context = LocalContext.current
     var selectedModalTrack by remember { mutableStateOf<AuraTrack?>(null) }
+    var isExpandedSongs by remember(artistDetail.id) { mutableStateOf(false) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     val allTracks = remember(artistDetail.topSongs) {
@@ -106,13 +116,22 @@ fun ArtistDetailScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(290.dp)
+                        .background(Color(0xFF161820))
                 ) {
-                    AsyncImage(
-                        model = artistDetail.bannerUrl,
-                        contentDescription = artistDetail.name,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier.fillMaxSize()
-                    )
+                    if (artistDetail.bannerUrl.isNotBlank()) {
+                        AsyncImage(
+                            model = artistDetail.bannerUrl,
+                            contentDescription = artistDetail.name,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    } else if (isLoading) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .auraShimmer()
+                        )
+                    }
 
                     // Gradient overlay to darken bottom so text is crisp and readable
                     Box(
@@ -165,13 +184,23 @@ fun ArtistDetailScreen(
                             overflow = TextOverflow.Ellipsis
                         )
                         Spacer(modifier = Modifier.height(3.dp))
-                        Text(
-                            text = artistDetail.subscribers,
-                            color = AuraNeonLime,
-                            fontWeight = FontWeight.SemiBold,
-                            fontSize = 13.sp,
-                            textAlign = TextAlign.End
-                        )
+                        if (artistDetail.subscribers.isNotBlank()) {
+                            Text(
+                                text = artistDetail.subscribers,
+                                color = AuraNeonLime,
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 13.sp,
+                                textAlign = TextAlign.End
+                            )
+                        } else if (isLoading) {
+                            Box(
+                                modifier = Modifier
+                                    .width(96.dp)
+                                    .height(13.dp)
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .auraShimmer()
+                            )
+                        }
                     }
                 }
             }
@@ -192,30 +221,415 @@ fun ArtistDetailScreen(
                         color = Color.White,
                         fontSize = 19.sp
                     )
+                }
+            }
 
-                    if (isLoading) {
-                        CircularProgressIndicator(
-                            color = AuraNeonLime,
-                            strokeWidth = 2.dp,
-                            modifier = Modifier.size(18.dp)
-                        )
+            val displayedSongs = if (isExpandedSongs) artistDetail.topSongs else artistDetail.topSongs.take(5)
+
+            // 3. Ranked Popular Songs Tiles with 3-dot vertical menu (or Skeleton loading)
+            if (isLoading && artistDetail.topSongs.isEmpty()) {
+                items(5) {
+                    com.auramusic.app.ui.components.TrackItemSkeleton()
+                }
+            } else {
+                items(displayedSongs, key = { "top_${it.rank}_${it.track.videoId}" }) { songItem ->
+                    val isCurrent = currentPlayingId == songItem.track.videoId
+                    ArtistPopularSongRow(
+                        rank = songItem.rank,
+                        track = songItem.track,
+                        playCount = songItem.playCount,
+                        isCurrent = isCurrent,
+                        onClick = { onPlayTrack(songItem.track, allTracks) },
+                        onOptionsClick = { selectedModalTrack = songItem.track }
+                    )
+                }
+            }
+
+            // "See More" Button for Popular Songs
+            if (artistDetail.topSongs.size > 5) {
+                item {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 20.dp, vertical = 6.dp),
+                        contentAlignment = Alignment.CenterStart
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(20.dp),
+                            color = Color(0xFF1E2028),
+                            border = BorderStroke(1.dp, Color(0xFF2E323D)),
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(20.dp))
+                                .clickable { isExpandedSongs = !isExpandedSongs }
+                        ) {
+                            Text(
+                                text = if (isExpandedSongs) "Show Less" else "See More (${artistDetail.topSongs.size - 5} more)",
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.5.sp,
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                            )
+                        }
                     }
                 }
             }
 
-            // 3. Ranked 1-10 Popular Songs Tiles with 3-dot vertical menu
-            items(artistDetail.topSongs, key = { "top_${it.rank}_${it.track.videoId}" }) { songItem ->
-                val isCurrent = currentPlayingId == songItem.track.videoId
-                ArtistPopularSongRow(
-                    rank = songItem.rank,
-                    track = songItem.track,
-                    playCount = songItem.playCount,
-                    isCurrent = isCurrent,
-                    onClick = { onPlayTrack(songItem.track, allTracks) },
-                    onOptionsClick = { selectedModalTrack = songItem.track }
-                )
+            // 4. Carousels Section (Albums, Singles & EPs, Videos, Live performances, Featured on, Playlists, Fans might also like)
+            if (artistDetail.carousels.isNotEmpty()) {
+                items(artistDetail.carousels, key = { "carousel_${it.title}" }) { carousel ->
+                    val isSimilarArtists = carousel.title.contains("fans might also like", ignoreCase = true) ||
+                            carousel.title.contains("similar", ignoreCase = true)
+                    val isVideos = carousel.title.contains("video", ignoreCase = true) ||
+                            carousel.title.contains("live performance", ignoreCase = true)
+
+                    Spacer(modifier = Modifier.height(20.dp))
+                    Column(modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp)) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 20.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = carousel.title,
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White,
+                                fontSize = 19.sp
+                            )
+                            if (carousel.items.isNotEmpty()) {
+                                Text(
+                                    text = "${carousel.items.size} items",
+                                    color = TextSecondary,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(14.dp))
+
+                        LazyRow(
+                            contentPadding = PaddingValues(horizontal = 20.dp),
+                            horizontalArrangement = Arrangement.spacedBy(14.dp)
+                        ) {
+                            items(carousel.items, key = { "${carousel.title}_${it.id}_${it.title}" }) { item ->
+                                when {
+                                    isSimilarArtists -> {
+                                        // Fans might also like: Circular Avatar
+                                        Column(
+                                            modifier = Modifier
+                                                .width(104.dp)
+                                                .clip(RoundedCornerShape(12.dp))
+                                                .clickable { onOpenArtist(item.title) },
+                                            horizontalAlignment = Alignment.CenterHorizontally
+                                        ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(96.dp)
+                                                    .clip(CircleShape)
+                                                    .background(Color(0xFF1E2028))
+                                            ) {
+                                                AsyncImage(
+                                                    model = item.highResArtworkUrl,
+                                                    contentDescription = item.title,
+                                                    contentScale = ContentScale.Crop,
+                                                    modifier = Modifier.fillMaxSize()
+                                                )
+                                            }
+                                            Spacer(modifier = Modifier.height(8.dp))
+                                            Text(
+                                                text = item.title,
+                                                color = Color.White,
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 13.sp,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                                textAlign = TextAlign.Center
+                                            )
+                                            if (item.subtitle.isNotBlank()) {
+                                                Text(
+                                                    text = item.subtitle,
+                                                    color = TextSecondary,
+                                                    fontSize = 11.5.sp,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis,
+                                                    textAlign = TextAlign.Center
+                                                )
+                                            }
+                                        }
+                                    }
+                                    isVideos -> {
+                                        // Videos & Live Performances: 16:9 Widescreen Cards
+                                        Column(
+                                            modifier = Modifier
+                                                .width(192.dp)
+                                                .clip(RoundedCornerShape(12.dp))
+                                                .clickable {
+                                                    val vidId = item.videoId.ifBlank { item.id }
+                                                    if (vidId.isNotBlank()) {
+                                                        val videoTrack = AuraTrack(
+                                                            id = "yt_$vidId",
+                                                            videoId = vidId,
+                                                            title = item.title,
+                                                            artist = artistDetail.name,
+                                                            album = carousel.title,
+                                                            artworkUrl = item.artworkUrl
+                                                        )
+                                                        onPlayTrack(videoTrack, listOf(videoTrack))
+                                                    }
+                                                }
+                                        ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .width(192.dp)
+                                                    .height(108.dp)
+                                                    .clip(RoundedCornerShape(12.dp))
+                                                    .background(Color(0xFF1E2028))
+                                            ) {
+                                                AsyncImage(
+                                                    model = item.highResArtworkUrl,
+                                                    contentDescription = item.title,
+                                                    contentScale = ContentScale.Crop,
+                                                    modifier = Modifier.fillMaxSize()
+                                                )
+                                                // Play badge overlay
+                                                Surface(
+                                                    shape = CircleShape,
+                                                    color = Color.Black.copy(alpha = 0.65f),
+                                                    modifier = Modifier
+                                                        .align(Alignment.Center)
+                                                        .size(36.dp)
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Rounded.PlayArrow,
+                                                        contentDescription = "Play",
+                                                        tint = AuraNeonLime,
+                                                        modifier = Modifier
+                                                            .padding(6.dp)
+                                                            .fillMaxSize()
+                                                    )
+                                                }
+                                            }
+                                            Spacer(modifier = Modifier.height(8.dp))
+                                            Text(
+                                                text = item.title,
+                                                color = Color.White,
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 13.sp,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                            if (item.subtitle.isNotBlank()) {
+                                                Text(
+                                                    text = item.subtitle,
+                                                    color = TextSecondary,
+                                                    fontSize = 11.5.sp,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            }
+                                        }
+                                    }
+                                    else -> {
+                                        // Square Release Cards (Albums, Singles & EPs, Featured on, Playlists)
+                                        Column(
+                                            modifier = Modifier
+                                                .width(130.dp)
+                                                .clip(RoundedCornerShape(14.dp))
+                                                .clickable {
+                                                    onOpenPlaylist(item)
+                                                }
+                                        ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(130.dp)
+                                                    .clip(RoundedCornerShape(12.dp))
+                                                    .background(Color(0xFF1E2028))
+                                            ) {
+                                                AsyncImage(
+                                                    model = item.highResArtworkUrl,
+                                                    contentDescription = item.title,
+                                                    contentScale = ContentScale.Crop,
+                                                    modifier = Modifier.fillMaxSize()
+                                                )
+                                                val badge = when {
+                                                    carousel.title.contains("Single", ignoreCase = true) -> "Single"
+                                                    carousel.title.contains("EP", ignoreCase = true) -> "EP"
+                                                    carousel.title.contains("Album", ignoreCase = true) -> "Album"
+                                                    carousel.title.contains("Playlist", ignoreCase = true) -> "Playlist"
+                                                    else -> ""
+                                                }
+                                                if (badge.isNotBlank()) {
+                                                    Surface(
+                                                        shape = RoundedCornerShape(topStart = 6.dp),
+                                                        color = Color.Black.copy(alpha = 0.70f),
+                                                        modifier = Modifier.align(Alignment.BottomEnd)
+                                                    ) {
+                                                        Text(
+                                                            text = badge,
+                                                            color = AuraNeonLime,
+                                                            fontSize = 9.5.sp,
+                                                            fontWeight = FontWeight.Bold,
+                                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                            Spacer(modifier = Modifier.height(8.dp))
+                                            Text(
+                                                text = item.title,
+                                                color = Color.White,
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 13.sp,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                            if (item.subtitle.isNotBlank()) {
+                                                Text(
+                                                    text = item.subtitle,
+                                                    color = TextSecondary,
+                                                    fontSize = 11.5.sp,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            } else if (artistDetail.albums.isNotEmpty()) {
+                // Backward compatibility: render albums if carousels list is empty
+                item {
+                    Spacer(modifier = Modifier.height(18.dp))
+                    Column(modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 20.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Albums & Discography",
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White,
+                                fontSize = 19.sp
+                            )
+                            Text(
+                                text = "${artistDetail.albums.size} releases",
+                                color = TextSecondary,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(14.dp))
+                        LazyRow(
+                            contentPadding = PaddingValues(horizontal = 20.dp),
+                            horizontalArrangement = Arrangement.spacedBy(14.dp)
+                        ) {
+                            items(artistDetail.albums, key = { "alb_${it.id}_${it.title}" }) { album ->
+                                Column(
+                                    modifier = Modifier
+                                        .width(130.dp)
+                                        .clip(RoundedCornerShape(14.dp))
+                                        .clickable {
+                                            onOpenPlaylist(
+                                                com.auramusic.app.domain.model.ArtistCarouselItem(
+                                                    id = album.id,
+                                                    title = album.title,
+                                                    subtitle = album.year,
+                                                    artworkUrl = album.artworkUrl,
+                                                    endpointType = "album",
+                                                    browseId = album.id
+                                                )
+                                            )
+                                        }
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(130.dp)
+                                            .clip(RoundedCornerShape(12.dp))
+                                            .background(Color(0xFF1E2028))
+                                    ) {
+                                        AsyncImage(
+                                            model = album.highResArtworkUrl,
+                                            contentDescription = album.title,
+                                            contentScale = ContentScale.Crop,
+                                            modifier = Modifier.fillMaxSize()
+                                        )
+                                        Surface(
+                                            shape = RoundedCornerShape(topStart = 6.dp),
+                                            color = Color.Black.copy(alpha = 0.70f),
+                                            modifier = Modifier.align(Alignment.BottomEnd)
+                                        ) {
+                                            Text(
+                                                text = album.type,
+                                                color = AuraNeonLime,
+                                                fontSize = 9.5.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                            )
+                                        }
+                                    }
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Text(
+                                        text = album.title,
+                                        color = Color.White,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 13.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        text = album.year,
+                                        color = TextSecondary,
+                                        fontSize = 11.5.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            } else if (isLoading) {
+                // Shimmer Skeletons when initial data is loading
+                item {
+                    Spacer(modifier = Modifier.height(20.dp))
+                    Column(modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)) {
+                        Text(
+                            text = "Albums & Discography",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White,
+                            fontSize = 19.sp,
+                            modifier = Modifier.padding(horizontal = 20.dp)
+                        )
+                        Spacer(modifier = Modifier.height(14.dp))
+                        AlbumCarouselSkeleton()
+                    }
+                    Spacer(modifier = Modifier.height(20.dp))
+                    Column(modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)) {
+                        Text(
+                            text = "Fans might also like",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White,
+                            fontSize = 19.sp,
+                            modifier = Modifier.padding(horizontal = 20.dp)
+                        )
+                        Spacer(modifier = Modifier.height(14.dp))
+                        ArtistCarouselSkeleton()
+                    }
+                }
             }
         }
+    }
 
         // 3-Dot Vertical Options Modal BottomSheet
         val modalTrack = selectedModalTrack
@@ -234,6 +648,7 @@ fun ArtistDetailScreen(
                     }
                 }
             ) {
+                com.auramusic.app.ui.components.ForceWhiteSystemBarsEffect()
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -317,7 +732,6 @@ fun ArtistDetailScreen(
             }
         }
     }
-}
 
 @Composable
 private fun ArtistPopularSongRow(

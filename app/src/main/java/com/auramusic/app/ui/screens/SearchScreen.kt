@@ -1,14 +1,12 @@
 package com.auramusic.app.ui.screens
 
+import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -24,17 +22,25 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.ArrowBack
+import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Clear
+import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.Favorite
+import androidx.compose.material.icons.rounded.FavoriteBorder
+import androidx.compose.material.icons.rounded.MoreVert
+import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Search
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -42,26 +48,80 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImage
+import com.auramusic.app.core.media.AuraPlayerManager
+import com.auramusic.app.domain.model.ArtistCarouselItem
 import com.auramusic.app.domain.model.AuraTrack
+import com.auramusic.app.domain.model.YtmTopArtist
+import com.auramusic.app.ui.components.AuraTrackOptionsModal
+import com.auramusic.app.ui.components.TrackItemSkeleton
 import com.auramusic.app.ui.theme.AuraNeonLime
 import com.auramusic.app.ui.theme.AuraPillInactive
 import com.auramusic.app.ui.theme.AuraPillInactiveText
-import com.auramusic.app.ui.theme.AuraPlayGreen
-import com.auramusic.app.ui.theme.SpotifyCard
 import com.auramusic.app.ui.theme.SpotifyPitchBlack
 import com.auramusic.app.ui.theme.TextPrimary
 import com.auramusic.app.ui.theme.TextSecondary
+
+private val FluidEasing = CubicBezierEasing(0.23f, 1f, 0.32f, 1f)
+
+data class BrowseCategory(
+    val title: String,
+    val backgroundColor: Color,
+    val artworkUrl: String,
+    val searchQuery: String
+)
+
+data class WatchPlaylistCard(
+    val title: String,
+    val badge: String? = null,
+    val artworkUrl: String,
+    val query: String
+)
+
+private val CURATED_BROWSE_CATEGORIES = listOf(
+    BrowseCategory("Music", Color(0xFFE11D48), "https://lh3.googleusercontent.com/RCpTA6EXJQyjVFDosWOKa2SMmqkua_lA9mHPDWWciLwgqpZLz9fS3xYq9R0_L9kF=w544-h544-l90-rj", "Pop"),
+    BrowseCategory("Podcasts", Color(0xFF006450), "https://lh3.googleusercontent.com/hnefGBrazRhn4Z92bdSZBUENl40ONjRiVDsmZKZh-WZ2iCKE-W_YyJtZ_fL4w=w544-h544-l90-rj", "Podcast"),
+    BrowseCategory("Audiobooks", Color(0xFF283EA3), "https://lh3.googleusercontent.com/f0uIq9s7qQYV4f_4zB1=w544-h544-l90-rj", "Audiobook"),
+    BrowseCategory("Live Events", Color(0xFF7358FF), "https://lh3.googleusercontent.com/zV8Q8k=w544-h544-l90-rj", "Live Performance"),
+    BrowseCategory("Made For You", Color(0xFF8C1932), "https://lh3.googleusercontent.com/dK0M_Fh5uQ6s4z7=w544-h544-l90-rj", "Favorites"),
+    BrowseCategory("Fitness", Color(0xFF4B5563), "https://lh3.googleusercontent.com/k9_a1=w544-h544-l90-rj", "Workout"),
+    BrowseCategory("Pop", Color(0xFFFF4632), "https://lh3.googleusercontent.com/sc_b2=w544-h544-l90-rj", "Pop Hits"),
+    BrowseCategory("Hip-Hop", Color(0xFFBA5D07), "https://lh3.googleusercontent.com/RCpTA6EXJQyjVFDosWOKa2SMmqkua_lA9mHPDWWciLwgqpZLz9fS3xYq9R0_L9kF=w544-h544-l90-rj", "Hip Hop"),
+    BrowseCategory("Rock", Color(0xFFE91429), "https://lh3.googleusercontent.com/f0uIq9s7qQYV4f_4zB1=w544-h544-l90-rj", "Rock Classics"),
+    BrowseCategory("Anime & J-Pop", Color(0xFF0D72EC), "https://lh3.googleusercontent.com/hnefGBrazRhn4Z92bdSZBUENl40ONjRiVDsmZKZh-WZ2iCKE-W_YyJtZ_fL4w=w544-h544-l90-rj", "Eve Anime"),
+    BrowseCategory("Chill & Lo-Fi", Color(0xFF148A08), "https://lh3.googleusercontent.com/zV8Q8k=w544-h544-l90-rj", "Lofi Chill"),
+    BrowseCategory("Charts", Color(0xFF8D67AB), "https://lh3.googleusercontent.com/k9_a1=w544-h544-l90-rj", "Top 50")
+)
+
+private val WATCH_PLAYLISTS = listOf(
+    WatchPlaylistCard("VIDEOS FOR YOU", "VIDEOS FOR YOU", "https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=600&q=80", "Music Videos"),
+    WatchPlaylistCard("Top Viral Throwbacks", null, "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=600&q=80", "Throwback Hits"),
+    WatchPlaylistCard("Throwback Party", null, "https://images.unsplash.com/photo-1516450360452-9312f5e86fc7?w=600&q=80", "Party Hits"),
+    WatchPlaylistCard("Anime Soundtracks", "J-POP", "https://images.unsplash.com/photo-1578632767115-351597cf2477?w=600&q=80", "Anime OST"),
+    WatchPlaylistCard("Lofi Study Sessions", "LO-FI", "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=600&q=80", "Lofi Beats")
+)
 
 @Composable
 fun SearchScreen(
@@ -72,23 +132,493 @@ fun SearchScreen(
     favorites: List<AuraTrack>,
     downloads: List<AuraTrack>,
     downloadingIds: Set<String>,
+    recentlyPlayed: List<AuraTrack> = emptyList(),
+    matchedArtist: YtmTopArtist? = null,
+    matchedArtists: List<YtmTopArtist> = emptyList(),
+    artistFeaturingItems: List<ArtistCarouselItem> = emptyList(),
+    currentPlayingId: String? = null,
     onQueryChange: (String) -> Unit,
     onFilterChange: (String) -> Unit,
     onPlayTrack: (AuraTrack, List<AuraTrack>) -> Unit,
+    onPlaySearchTrack: (AuraTrack, List<AuraTrack>) -> Unit = onPlayTrack,
     onToggleFavorite: (AuraTrack) -> Unit,
-    onDownloadTrack: (AuraTrack) -> Unit
+    onDownloadTrack: (AuraTrack) -> Unit,
+    onRemoveRecentlyPlayed: (AuraTrack) -> Unit = {},
+    onOpenArtist: (String, String) -> Unit = { _, _ -> }
 ) {
-    val listState = rememberLazyListState()
-    val searchEasing = remember { CubicBezierEasing(0.23f, 1f, 0.32f, 1f) }
+    val context = LocalContext.current
+    var isSearchActive by rememberSaveable { mutableStateOf(query.isNotBlank()) }
+    var selectedModalTrack by remember { mutableStateOf<AuraTrack?>(null) }
+    val focusRequester = remember { FocusRequester() }
 
-    val isScrolled by remember {
-        derivedStateOf {
-            listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 20
+    val showActiveSearch = isSearchActive || query.isNotBlank()
+
+    // If query gets populated from external or user types, activate search screen
+    LaunchedEffect(query) {
+        if (query.isNotBlank() && !isSearchActive) {
+            isSearchActive = true
         }
     }
 
-    LaunchedEffect(query, filter) {
-        if (listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 0) {
+    // Intercept back button when dedicated search screen is open
+    BackHandler(enabled = showActiveSearch) {
+        if (query.isNotEmpty()) {
+            onQueryChange("")
+        } else {
+            isSearchActive = false
+        }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(SpotifyPitchBlack)
+    ) {
+        if (!showActiveSearch) {
+            // =========================================================================
+            // 1. SEARCH EXPLORE SCREEN (Default Browse Mode matching Image 1)
+            // =========================================================================
+            SearchExploreView(
+                onSearchFieldClick = {
+                    isSearchActive = true
+                },
+                onCategoryClick = { category ->
+                    isSearchActive = true
+                    onQueryChange(category.searchQuery)
+                },
+                onWatchPlaylistClick = { watchItem ->
+                    isSearchActive = true
+                    onQueryChange(watchItem.query)
+                }
+            )
+        } else {
+            // =========================================================================
+            // 2. DEDICATED SEARCHING SCREEN (Active Search Mode matching Image 2)
+            // =========================================================================
+            DedicatedSearchingView(
+                query = query,
+                filter = filter,
+                results = results,
+                isSearching = isSearching,
+                favorites = favorites,
+                recentlyPlayed = recentlyPlayed,
+                matchedArtist = matchedArtist,
+                matchedArtists = matchedArtists,
+                artistFeaturingItems = artistFeaturingItems,
+                currentPlayingId = currentPlayingId,
+                focusRequester = focusRequester,
+                onBackClick = {
+                    onQueryChange("")
+                    isSearchActive = false
+                },
+                onQueryChange = onQueryChange,
+                onFilterChange = onFilterChange,
+                onPlayTrack = onPlayTrack,
+                onPlaySearchTrack = onPlaySearchTrack,
+                onToggleFavorite = onToggleFavorite,
+                onRemoveRecentlyPlayed = onRemoveRecentlyPlayed,
+                onOptionsClick = { selectedModalTrack = it },
+                onOpenArtist = onOpenArtist
+            )
+        }
+
+        // Track Options Modal (Play Next, Add to Queue, Liked Songs, Go to Artist)
+        selectedModalTrack?.let { modalTrack ->
+            AuraTrackOptionsModal(
+                track = modalTrack,
+                isFavorite = favorites.any { it.videoId == modalTrack.videoId },
+                onDismiss = { selectedModalTrack = null },
+                onPlayNext = {
+                    AuraPlayerManager.playNext(modalTrack)
+                    Toast.makeText(context, "Playing next: ${modalTrack.title}", Toast.LENGTH_SHORT).show()
+                    selectedModalTrack = null
+                },
+                onAddToQueue = {
+                    AuraPlayerManager.enqueueTrack(modalTrack)
+                    Toast.makeText(context, "Added to queue: ${modalTrack.title}", Toast.LENGTH_SHORT).show()
+                    selectedModalTrack = null
+                },
+                onToggleFavorite = {
+                    val wasFav = favorites.any { it.videoId == modalTrack.videoId }
+                    onToggleFavorite(modalTrack)
+                    val msg = if (wasFav) "Removed from Liked Songs" else "Added to Liked Songs"
+                    Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                    selectedModalTrack = null
+                },
+                onAddToPlaylist = {
+                    Toast.makeText(context, "Saved to library", Toast.LENGTH_SHORT).show()
+                    selectedModalTrack = null
+                },
+                onGoToArtist = {
+                    selectedModalTrack = null
+                    onOpenArtist(modalTrack.artist, modalTrack.title)
+                }
+            )
+        }
+    }
+}
+
+/**
+ * Explore Screen matching Image 1:
+ * - Search headline
+ * - White search input button ("What do you want to listen to?")
+ * - 2-column colorful angled-image category cards
+ * - "Playlists you can watch" portrait video carousel
+ * - "More for you" category cards
+ */
+@Composable
+private fun SearchExploreView(
+    onSearchFieldClick: () -> Unit,
+    onCategoryClick: (BrowseCategory) -> Unit,
+    onWatchPlaylistClick: (WatchPlaylistCard) -> Unit
+) {
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(bottom = 140.dp)
+    ) {
+        item {
+            // Header: Title & White Search Bar
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
+                    .padding(top = 10.dp)
+            ) {
+                Text(
+                    text = "Search",
+                    style = MaterialTheme.typography.headlineLarge,
+                    color = TextPrimary,
+                    fontWeight = FontWeight.Bold
+                )
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // White Search Bar matching Image 1
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable(onClick = onSearchFieldClick),
+                    shape = RoundedCornerShape(8.dp),
+                    color = Color.White
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(horizontal = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Search,
+                            contentDescription = "Search",
+                            tint = Color(0xFF191414),
+                            modifier = Modifier.size(24.dp)
+                        )
+
+                        Spacer(modifier = Modifier.width(10.dp))
+
+                        Text(
+                            text = "What do you want to listen to?",
+                            fontSize = 14.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF555555)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(20.dp))
+
+                Text(
+                    text = "Start browsing",
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = TextPrimary
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+            }
+        }
+
+        // First 4 Top Category Cards (2 columns)
+        val firstBatch = CURATED_BROWSE_CATEGORIES.take(4)
+        items(firstBatch.chunked(2)) { pair ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                pair.forEach { category ->
+                    Box(modifier = Modifier.weight(1f)) {
+                        SpotifyCategoryCard(
+                            category = category,
+                            onClick = { onCategoryClick(category) }
+                        )
+                    }
+                }
+                if (pair.size == 1) {
+                    Spacer(modifier = Modifier.weight(1f))
+                }
+            }
+        }
+
+        // Carousel Section: "Playlists you can watch" matching Image 1
+        item {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 22.dp, bottom = 12.dp)
+            ) {
+                Text(
+                    text = "Playlists you can watch",
+                    fontSize = 19.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = TextPrimary,
+                    modifier = Modifier.padding(horizontal = 16.dp)
+                )
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                LazyRow(
+                    contentPadding = PaddingValues(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    items(WATCH_PLAYLISTS) { watchCard ->
+                        PortraitWatchPlaylistCard(
+                            item = watchCard,
+                            onClick = { onWatchPlaylistClick(watchCard) }
+                        )
+                    }
+                }
+            }
+        }
+
+        // Section: "More for you" category cards
+        item {
+            Text(
+                text = "More for you",
+                fontSize = 19.sp,
+                fontWeight = FontWeight.Bold,
+                color = TextPrimary,
+                modifier = Modifier
+                    .padding(horizontal = 16.dp)
+                    .padding(top = 16.dp, bottom = 12.dp)
+            )
+        }
+
+        val secondBatch = CURATED_BROWSE_CATEGORIES.drop(4)
+        items(secondBatch.chunked(2)) { pair ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                pair.forEach { category ->
+                    Box(modifier = Modifier.weight(1f)) {
+                        SpotifyCategoryCard(
+                            category = category,
+                            onClick = { onCategoryClick(category) }
+                        )
+                    }
+                }
+                if (pair.size == 1) {
+                    Spacer(modifier = Modifier.weight(1f))
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Spotify Category Card:
+ * Bold white title in top-left, rotated angled artwork overflowing at bottom-right corner.
+ */
+@Composable
+private fun SpotifyCategoryCard(
+    category: BrowseCategory,
+    onClick: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(98.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .background(category.backgroundColor)
+            .clickable(onClick = onClick)
+    ) {
+        // Rotated cover art image overflowing the bottom right edge
+        AsyncImage(
+            model = category.artworkUrl,
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .graphicsLayer {
+                    translationX = 14.dp.toPx()
+                    translationY = 8.dp.toPx()
+                    rotationZ = 25f
+                }
+                .size(68.dp)
+                .clip(RoundedCornerShape(6.dp))
+        )
+
+        // Category Title
+        Text(
+            text = category.title,
+            fontSize = 16.sp,
+            fontWeight = FontWeight.Bold,
+            color = Color.White,
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .padding(top = 12.dp, start = 12.dp, end = 46.dp),
+            maxLines = 2,
+            lineHeight = 20.sp
+        )
+    }
+}
+
+/**
+ * Vertical Portrait Playlist Card matching "Playlists you can watch" in Image 1.
+ */
+@Composable
+private fun PortraitWatchPlaylistCard(
+    item: WatchPlaylistCard,
+    onClick: () -> Unit
+) {
+    Surface(
+        modifier = Modifier
+            .width(145.dp)
+            .height(215.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick),
+        shape = RoundedCornerShape(12.dp),
+        color = Color(0xFF1E2028)
+    ) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            AsyncImage(
+                model = item.artworkUrl,
+                contentDescription = item.title,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
+
+            // Scrim overlay for legibility
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                Color.Transparent,
+                                Color(0x33000000),
+                                Color(0xCC000000),
+                                Color(0xFA000000)
+                            )
+                        )
+                    )
+            )
+
+            // Content at the bottom
+            Column(
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(12.dp)
+            ) {
+                if (item.badge != null) {
+                    Surface(
+                        shape = RoundedCornerShape(4.dp),
+                        color = Color(0xFFD946EF),
+                        modifier = Modifier.padding(bottom = 6.dp)
+                    ) {
+                        Text(
+                            text = item.badge,
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = Color.White,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                            letterSpacing = 0.5.sp
+                        )
+                    }
+                }
+
+                Text(
+                    text = item.title,
+                    fontSize = 13.5.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White,
+                    maxLines = 2,
+                    lineHeight = 17.sp,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Dedicated Searching Screen matching Image 2:
+ * - Header with `←` back arrow, search text field with auto-focus and clear button
+ * - Filter pills pinned inside the header below search input
+ * - When query is blank: list of recently played songs with cover image, title, artist, heart icon, and `✕` remove button
+ * - When query is active: matched artist header with "Follow" button, "Featuring" carousel, and song search tiles with 3-dot and heart icons
+ */
+@Composable
+private fun DedicatedSearchingView(
+    query: String,
+    filter: String,
+    results: List<AuraTrack>,
+    isSearching: Boolean,
+    favorites: List<AuraTrack>,
+    recentlyPlayed: List<AuraTrack>,
+    matchedArtist: YtmTopArtist?,
+    matchedArtists: List<YtmTopArtist> = emptyList(),
+    artistFeaturingItems: List<ArtistCarouselItem>,
+    currentPlayingId: String?,
+    focusRequester: FocusRequester,
+    onBackClick: () -> Unit,
+    onQueryChange: (String) -> Unit,
+    onFilterChange: (String) -> Unit,
+    onPlayTrack: (AuraTrack, List<AuraTrack>) -> Unit,
+    onPlaySearchTrack: (AuraTrack, List<AuraTrack>) -> Unit = onPlayTrack,
+    onToggleFavorite: (AuraTrack) -> Unit,
+    onRemoveRecentlyPlayed: (AuraTrack) -> Unit,
+    onOptionsClick: (AuraTrack) -> Unit,
+    onOpenArtist: (String, String) -> Unit
+) {
+    val listState = rememberLazyListState()
+    val focusManager = LocalFocusManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
+
+    // Request keyboard focus when dedicated search screen is mounted
+    LaunchedEffect(Unit) {
+        if (query.isEmpty()) {
+            try {
+                focusRequester.requestFocus()
+            } catch (_: Exception) {}
+        }
+    }
+
+    // Clear input focus when scrolling search results so opening modals/player later never re-triggers the IME
+    LaunchedEffect(listState.isScrollInProgress) {
+        if (listState.isScrollInProgress) {
+            focusManager.clearFocus()
+            keyboardController?.hide()
+        }
+    }
+
+    // Always ensure list starts at top when typing a query or when matched artist/results arrive
+    LaunchedEffect(query) {
+        listState.scrollToItem(0)
+    }
+    LaunchedEffect(matchedArtist) {
+        if (matchedArtist != null) {
+            listState.scrollToItem(0)
+        }
+    }
+    LaunchedEffect(results) {
+        if (results.isNotEmpty() && matchedArtist == null) {
             listState.scrollToItem(0)
         }
     }
@@ -97,168 +627,589 @@ fun SearchScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(SpotifyPitchBlack)
-            .padding(top = 2.dp)
     ) {
-        // Collapsible "Search" Headline: Pushes up and hides when scrolling songs
-        AnimatedVisibility(
-            visible = !isScrolled,
-            enter = expandVertically(
-                animationSpec = tween(durationMillis = 220, easing = searchEasing)
-            ) + fadeIn(
-                animationSpec = tween(durationMillis = 180)
-            ) + slideInVertically(
-                animationSpec = tween(durationMillis = 220, easing = searchEasing),
-                initialOffsetY = { -it }
-            ),
-            exit = shrinkVertically(
-                animationSpec = tween(durationMillis = 200, easing = searchEasing)
-            ) + fadeOut(
-                animationSpec = tween(durationMillis = 150)
-            ) + slideOutVertically(
-                animationSpec = tween(durationMillis = 200, easing = searchEasing),
-                targetOffsetY = { -it }
-            )
-        ) {
-            Column {
-                Text(
-                    text = "Search",
-                    style = MaterialTheme.typography.headlineLarge,
-                    color = TextPrimary,
-                    modifier = Modifier.padding(horizontal = 20.dp)
-                )
-
-                Spacer(modifier = Modifier.height(8.dp))
-            }
-        }
-
-        // Search Input Bar (Slim, compact 40dp height with pill shape)
-        Box(
+        // =========================================================================
+        // PINNED HEADER: Back Button + Search Box + Pinned Filter Pills
+        // =========================================================================
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 20.dp)
-                .height(40.dp)
-                .clip(RoundedCornerShape(20.dp))
-                .background(Color(0xFF1E2026))
-                .border(
-                    width = 1.dp,
-                    color = if (query.isNotEmpty()) AuraNeonLime else Color(0xFF2C2F3A),
-                    shape = RoundedCornerShape(20.dp)
-                )
-                .padding(horizontal = 14.dp),
-            contentAlignment = Alignment.CenterStart
+                .background(Color(0xFF14151B))
+                .statusBarsPadding()
+                .padding(top = 4.dp, bottom = 8.dp)
         ) {
+            // Search Input Row
             Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(
-                    imageVector = Icons.Rounded.Search,
-                    contentDescription = "Search",
-                    tint = TextSecondary,
-                    modifier = Modifier.size(18.dp)
-                )
-
-                Spacer(modifier = Modifier.width(10.dp))
-
-                Box(
-                    modifier = Modifier.weight(1f),
-                    contentAlignment = Alignment.CenterStart
-                ) {
-                    if (query.isEmpty()) {
-                        Text(
-                            text = "What do you want to listen to?",
-                            color = TextSecondary,
-                            fontSize = 13.sp,
-                            maxLines = 1
-                        )
-                    }
-
-                    BasicTextField(
-                        value = query,
-                        onValueChange = onQueryChange,
-                        singleLine = true,
-                        textStyle = MaterialTheme.typography.bodyMedium.copy(
-                            color = TextPrimary,
-                            fontSize = 13.sp
-                        ),
-                        cursorBrush = SolidColor(AuraPlayGreen),
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
-
-                if (query.isNotEmpty()) {
-                    IconButton(
-                        onClick = { onQueryChange("") },
-                        modifier = Modifier.size(26.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.Clear,
-                            contentDescription = "Clear Search",
-                            tint = TextSecondary,
-                            modifier = Modifier.size(16.dp)
-                        )
-                    }
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(12.dp))
-
-        // Filter Pills matching Home & Library
-        Row(
-            modifier = Modifier.padding(horizontal = 20.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            listOf("songs" to "Songs", "videos" to "Videos").forEach { (key, label) ->
-                val selected = filter == key
-                Surface(
-                    shape = CircleShape,
-                    color = if (selected) AuraNeonLime else AuraPillInactive,
-                    modifier = Modifier
-                        .clip(CircleShape)
-                        .clickable { onFilterChange(key) }
-                ) {
-                    Text(
-                        text = label,
-                        color = if (selected) Color.Black else AuraPillInactiveText,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 12.sp,
-                        modifier = Modifier.padding(horizontal = 18.dp, vertical = 7.dp)
-                    )
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(10.dp))
-
-        if (isSearching) {
-            Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(vertical = 24.dp),
-                contentAlignment = Alignment.Center
+                    .padding(horizontal = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                CircularProgressIndicator(color = AuraPlayGreen, modifier = Modifier.size(28.dp))
+                IconButton(
+                    onClick = onBackClick,
+                    modifier = Modifier.size(44.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.ArrowBack,
+                        contentDescription = "Back to Explore",
+                        tint = Color.White,
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.width(4.dp))
+
+                // Search Text Box
+                Surface(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(42.dp),
+                    shape = RoundedCornerShape(8.dp),
+                    color = Color(0xFF262832)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(horizontal = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier.weight(1f),
+                            contentAlignment = Alignment.CenterStart
+                        ) {
+                            if (query.isEmpty()) {
+                                Text(
+                                    text = "What do you want to listen to?",
+                                    color = Color(0xFF8E929E),
+                                    fontSize = 13.5.sp,
+                                    maxLines = 1
+                                )
+                            }
+
+                            BasicTextField(
+                                value = query,
+                                onValueChange = onQueryChange,
+                                singleLine = true,
+                                textStyle = MaterialTheme.typography.bodyMedium.copy(
+                                    color = Color.White,
+                                    fontSize = 14.sp
+                                ),
+                                cursorBrush = SolidColor(AuraNeonLime),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .focusRequester(focusRequester)
+                            )
+                        }
+
+                        if (query.isNotEmpty()) {
+                            IconButton(
+                                onClick = { onQueryChange("") },
+                                modifier = Modifier.size(28.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Clear,
+                                    contentDescription = "Clear search",
+                                    tint = Color(0xFFB0B4C0),
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.width(8.dp))
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Filter Pills pinned inside the header below search field matching Image 2
+            val filterOptions = listOf(
+                "all" to "All",
+                "artists" to "Artists",
+                "songs" to "Songs",
+                "videos" to "Videos",
+                "playlists" to "Playlists",
+                "albums" to "Albums"
+            )
+
+            LazyRow(
+                contentPadding = PaddingValues(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(filterOptions) { (key, label) ->
+                    val isSelected = filter == key
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        color = if (isSelected) AuraNeonLime else Color(0xFF262832),
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(16.dp))
+                            .clickable {
+                                focusManager.clearFocus()
+                                keyboardController?.hide()
+                                onFilterChange(key)
+                            }
+                    ) {
+                        Text(
+                            text = label,
+                            color = if (isSelected) Color(0xFF111215) else Color(0xFFC0C4CC),
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                            fontSize = 12.sp,
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
+                        )
+                    }
+                }
             }
         }
 
+        // =========================================================================
+        // SCROLL CONTENT: Recent Searches (if blank) OR Query Search Results (if active)
+        // =========================================================================
         LazyColumn(
             state = listState,
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(bottom = 140.dp)
+            contentPadding = PaddingValues(top = 10.dp, bottom = 140.dp)
         ) {
-            items(results, key = { it.videoId }) { track ->
-                SpotifyTrackRowItem(
-                    track = track,
-                    isCurrent = false,
-                    isFavorite = favorites.any { it.videoId == track.videoId },
-                    isDownloaded = downloads.any { it.videoId == track.videoId },
-                    isDownloading = downloadingIds.contains(track.videoId),
-                    onClick = { onPlayTrack(track, results) },
-                    onToggleFavorite = { onToggleFavorite(track) },
-                    onDownload = { onDownloadTrack(track) }
+            if (query.isBlank()) {
+                // -------------------------------------------------------------
+                // EMPTY QUERY: POPULATE RECENT PLAYED SONGS WITH HEART & X
+                // -------------------------------------------------------------
+                item {
+                    Text(
+                        text = "Recent searches",
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White,
+                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)
+                    )
+                }
+
+                if (recentlyPlayed.isEmpty()) {
+                    item {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 48.dp, horizontal = 24.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text(
+                                text = "Play songs or search to build your recent history",
+                                color = Color(0xFF7A7D87),
+                                fontSize = 13.5.sp
+                            )
+                        }
+                    }
+                } else {
+                    items(recentlyPlayed, key = { "recent_${it.videoId}" }) { track ->
+                        val isFav = favorites.any { it.videoId == track.videoId }
+                        RecentPlayedTrackRow(
+                            track = track,
+                            isFavorite = isFav,
+                            onClick = { onPlayTrack(track, recentlyPlayed) },
+                            onToggleFavorite = { onToggleFavorite(track) },
+                            onRemove = { onRemoveRecentlyPlayed(track) }
+                        )
+                    }
+                }
+            } else {
+                // -------------------------------------------------------------
+                // ACTIVE QUERY: ARTIST MATCH + FEATURING CAROUSEL + SONG TILES
+                // -------------------------------------------------------------
+                if (isSearching && results.isEmpty()) {
+                    items(6) {
+                        TrackItemSkeleton()
+                    }
+                } else {
+                    // 1. Matched Artist Header Card (Image 2 style)
+                    if (matchedArtist != null && (filter == "all" || filter == "artists")) {
+                        item(key = "matched_artist_${matchedArtist.id}") {
+                            ArtistSearchResultHeader(
+                                artist = matchedArtist,
+                                onClick = { onOpenArtist(matchedArtist.name, "") }
+                            )
+                        }
+                    }
+
+                    // 2. Featuring Carousel (Image 2 style)
+                    if (matchedArtist != null && artistFeaturingItems.isNotEmpty() && (filter == "all" || filter == "artists" || filter == "albums" || filter == "playlists")) {
+                        item(key = "feat_carousel_${matchedArtist.id}") {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 16.dp, bottom = 8.dp)
+                            ) {
+                                Text(
+                                    text = "Featuring ${matchedArtist.name}",
+                                    fontSize = 18.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White,
+                                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp)
+                                )
+
+                                LazyRow(
+                                    contentPadding = PaddingValues(horizontal = 20.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(14.dp)
+                                ) {
+                                    items(artistFeaturingItems, key = { it.id }) { featItem ->
+                                        FeaturingAlbumCard(
+                                            item = featItem,
+                                            onClick = { onOpenArtist(matchedArtist.name, "") }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // In "all" mode, show secondary artist if present right below featuring carousel (Image 2 style)
+                    if (filter == "all" && matchedArtists.size > 1) {
+                        val secondaryArtist = matchedArtists[1]
+                        item(key = "secondary_artist_${secondaryArtist.id}") {
+                            ArtistSearchResultHeader(
+                                artist = secondaryArtist,
+                                onClick = { onOpenArtist(secondaryArtist.name, "") }
+                            )
+                        }
+                    }
+
+                    // In "artists" mode, show all other matching artists
+                    if (filter == "artists") {
+                        val remainingArtists = if (matchedArtist != null) {
+                            matchedArtists.filter { it.id != matchedArtist.id }
+                        } else matchedArtists
+
+                        items(remainingArtists, key = { "artist_${it.id}" }) { artist ->
+                            ArtistSearchResultHeader(
+                                artist = artist,
+                                onClick = { onOpenArtist(artist.name, "") }
+                            )
+                        }
+                    }
+
+                    // 3. Song Search Result Tiles (Image 2 style: Cover + Title/Artist + 3-dot + Heart)
+                    items(results.distinctBy { it.videoId }, key = { "res_${it.videoId}" }) { track ->
+                        val isFav = favorites.any { it.videoId == track.videoId }
+                        val isCurrent = currentPlayingId == track.videoId
+
+                        SearchResultSongTile(
+                            track = track,
+                            isCurrent = isCurrent,
+                            isFavorite = isFav,
+                            onClick = {
+                                focusManager.clearFocus()
+                                keyboardController?.hide()
+                                onPlaySearchTrack(track, results)
+                            },
+                            onToggleFavorite = { onToggleFavorite(track) },
+                            onOptionsClick = {
+                                focusManager.clearFocus()
+                                keyboardController?.hide()
+                                onOptionsClick(track)
+                            }
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Tile for Recent Played Songs on the Dedicated Search Screen:
+ * Cover image, Title, Artist, and on the right side: Heart icon and 'X' remove icon.
+ */
+@Composable
+private fun RecentPlayedTrackRow(
+    track: AuraTrack,
+    isFavorite: Boolean,
+    onClick: () -> Unit,
+    onToggleFavorite: () -> Unit,
+    onRemove: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 20.dp, vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        AsyncImage(
+            model = track.highResArtworkUrl,
+            contentDescription = track.title,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier
+                .size(52.dp)
+                .clip(RoundedCornerShape(8.dp))
+        )
+
+        Spacer(modifier = Modifier.width(14.dp))
+
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .clickable(onClick = onClick)
+        ) {
+            Text(
+                text = track.title,
+                fontSize = 14.5.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color.White,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+
+            Spacer(modifier = Modifier.height(3.dp))
+
+            Text(
+                text = "Song • ${track.artist}",
+                fontSize = 12.5.sp,
+                color = Color(0xFFA0A5B5),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+
+        Spacer(modifier = Modifier.width(8.dp))
+
+        // Heart Icon on the right
+        IconButton(
+            onClick = onToggleFavorite,
+            modifier = Modifier.size(38.dp)
+        ) {
+            Icon(
+                imageVector = if (isFavorite) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
+                contentDescription = if (isFavorite) "Unlike" else "Like",
+                tint = if (isFavorite) AuraNeonLime else Color(0xFFA0A5B5),
+                modifier = Modifier.size(20.dp)
+            )
+        }
+
+        // 'X' Remove from recent list icon button
+        IconButton(
+            onClick = onRemove,
+            modifier = Modifier.size(38.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.Close,
+                contentDescription = "Remove from recent",
+                tint = Color(0xFF7E8290),
+                modifier = Modifier.size(20.dp)
+            )
+        }
+    }
+}
+
+/**
+ * Artist Result Header Tile matching Image 2:
+ * Circular Avatar + Artist Name with Verified Checkmark + "Follow" Pill Button.
+ */
+@Composable
+private fun ArtistSearchResultHeader(
+    artist: YtmTopArtist,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 20.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        AsyncImage(
+            model = artist.highResAvatarUrl,
+            contentDescription = artist.name,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier
+                .size(60.dp)
+                .clip(CircleShape)
+        )
+
+        Spacer(modifier = Modifier.width(14.dp))
+
+        Column(modifier = Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = artist.name,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+
+                Spacer(modifier = Modifier.width(6.dp))
+
+                Icon(
+                    imageVector = Icons.Rounded.CheckCircle,
+                    contentDescription = "Verified Artist",
+                    tint = AuraNeonLime,
+                    modifier = Modifier.size(16.dp)
                 )
             }
+
+            Spacer(modifier = Modifier.height(3.dp))
+
+            val subText = if (artist.subscribers.isNotBlank()) {
+                if (artist.subscribers.startsWith("Artist", ignoreCase = true)) artist.subscribers else "Artist • ${artist.subscribers}"
+            } else "Artist"
+
+            Text(
+                text = subText,
+                fontSize = 12.5.sp,
+                color = Color(0xFFA0A5B5),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+
+        // "Follow" Pill Button
+        Surface(
+            shape = RoundedCornerShape(percent = 50),
+            color = Color.Transparent,
+            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.60f)),
+            modifier = Modifier
+                .clip(RoundedCornerShape(percent = 50))
+                .clickable(onClick = onClick)
+        ) {
+            Text(
+                text = "Follow",
+                color = Color.White,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
+            )
+        }
+    }
+}
+
+/**
+ * Square Featuring Card matching the horizontal carousel below the artist in Image 2.
+ */
+@Composable
+private fun FeaturingAlbumCard(
+    item: ArtistCarouselItem,
+    onClick: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .width(135.dp)
+            .clickable(onClick = onClick)
+    ) {
+        AsyncImage(
+            model = item.highResArtworkUrl,
+            contentDescription = item.title,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier
+                .size(135.dp)
+                .clip(RoundedCornerShape(8.dp))
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Text(
+            text = item.title,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Bold,
+            color = Color.White,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+
+        if (item.subtitle.isNotBlank()) {
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                text = item.subtitle,
+                fontSize = 11.5.sp,
+                color = Color(0xFFA0A5B5),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
+/**
+ * Song Search Result Tile matching Image 2:
+ * Square Artwork + Title & Artist + 3-Dot Options Icon + Heart Favorite Icon.
+ */
+@Composable
+private fun SearchResultSongTile(
+    track: AuraTrack,
+    isCurrent: Boolean,
+    isFavorite: Boolean,
+    onClick: () -> Unit,
+    onToggleFavorite: () -> Unit,
+    onOptionsClick: () -> Unit,
+    onOpenArtist: (String, String) -> Unit = { _, _ -> }
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 20.dp, vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        AsyncImage(
+            model = track.highResArtworkUrl,
+            contentDescription = track.title,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier
+                .size(52.dp)
+                .clip(RoundedCornerShape(8.dp))
+        )
+
+        Spacer(modifier = Modifier.width(14.dp))
+
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .clickable(onClick = onClick)
+        ) {
+            Text(
+                text = track.title,
+                fontSize = 14.5.sp,
+                fontWeight = FontWeight.Bold,
+                color = if (isCurrent) AuraNeonLime else Color.White,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+
+            Spacer(modifier = Modifier.height(3.dp))
+
+            Text(
+                text = "Song • ${track.artist}",
+                fontSize = 12.5.sp,
+                color = Color(0xFFA0A5B5),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+
+        Spacer(modifier = Modifier.width(6.dp))
+
+        // 3-Dot Options Menu Icon
+        IconButton(
+            onClick = onOptionsClick,
+            modifier = Modifier.size(38.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.MoreVert,
+                contentDescription = "Song options",
+                tint = Color(0xFFA0A5B5),
+                modifier = Modifier.size(20.dp)
+            )
+        }
+
+        // Heart Like Icon
+        IconButton(
+            onClick = onToggleFavorite,
+            modifier = Modifier.size(38.dp)
+        ) {
+            Icon(
+                imageVector = if (isFavorite) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
+                contentDescription = if (isFavorite) "Unlike" else "Like",
+                tint = if (isFavorite) AuraNeonLime else Color(0xFFA0A5B5),
+                modifier = Modifier.size(20.dp)
+            )
         }
     }
 }
