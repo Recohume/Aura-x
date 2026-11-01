@@ -456,7 +456,7 @@ object AuraPlayerManager {
                     val fresh = radio.filterNot { existingIds.contains(it.videoId) }
                     if (fresh.isNotEmpty()) {
                         _queue.value = _queue.value + fresh
-                        exoPlayer?.addMediaItems(fresh.map { buildMediaItem(it) })
+                        syncUpcomingItemsInPlayer(fresh)
                         fresh.firstOrNull()?.let { SimpMusicExtractorEngine.prefetchStream(it.videoId) }
                     }
                 }
@@ -469,9 +469,8 @@ object AuraPlayerManager {
         val curIdx = list.indexOfFirst { it.videoId == cur.videoId }
         val before = if (curIdx >= 0) list.take(curIdx + 1) else listOf(cur)
         val after = if (curIdx >= 0) list.drop(curIdx + 1).shuffled() else list.filterNot { it.videoId == cur.videoId }.shuffled()
-        val newOrder = before + after
-        _queue.value = newOrder
-        syncPlayerPlaylist(newOrder, curIdx.coerceAtLeast(0))
+        _queue.value = before + after
+        syncUpcomingItemsInPlayer(after)
     }
 
     fun restoreOriginalQueue() {
@@ -479,8 +478,10 @@ object AuraPlayerManager {
         val cur = _currentTrack.value ?: return
         val origIdx = originalQueue.indexOfFirst { it.videoId == cur.videoId }
         if (origIdx >= 0) {
-            _queue.value = originalQueue
-            syncPlayerPlaylist(originalQueue, origIdx)
+            val before = originalQueue.take(origIdx + 1)
+            val after = originalQueue.drop(origIdx + 1)
+            _queue.value = before + after
+            syncUpcomingItemsInPlayer(after)
         }
     }
 
@@ -491,8 +492,15 @@ object AuraPlayerManager {
         val before = if (curIdx >= 0) list.take(curIdx + 1) else listOf(cur)
         val updated = before + newUpcomingList
         _queue.value = updated
+        syncUpcomingItemsInPlayer(newUpcomingList)
+    }
 
-        // Seamlessly sync ExoPlayer's upcoming items WITHOUT calling setMediaItems (which pauses audio)
+    /**
+     * Seamlessly updates upcoming items in ExoPlayer timeline WITHOUT calling setMediaItems.
+     * Calling setMediaItems would re-initialize the media source, causing playback to pause,
+     * re-buffer, and glitch the slider/play-pause icon.
+     */
+    private fun syncUpcomingItemsInPlayer(newUpcomingList: List<AuraTrack>) {
         val player = exoPlayer ?: return
         try {
             val playerCurIdx = player.currentMediaItemIndex
@@ -507,16 +515,8 @@ object AuraPlayerManager {
                 player.addMediaItems(newMediaItems)
             }
         } catch (e: Exception) {
-            Log.w(TAG, "Non-critical error updating upcoming items in player: ${e.message}")
+            Log.w(TAG, "Non-critical error syncing upcoming items in player: ${e.message}")
         }
-    }
-
-    private fun syncPlayerPlaylist(newList: List<AuraTrack>, currentIndex: Int) {
-        val player = exoPlayer ?: return
-        val currentPosition = player.currentPosition
-        val isCurrentlyPlaying = player.isPlaying
-        player.setMediaItems(newList.map { buildMediaItem(it) }, currentIndex, currentPosition)
-        if (isCurrentlyPlaying) player.play()
     }
 
     fun seekToSeconds(seconds: Float) {
