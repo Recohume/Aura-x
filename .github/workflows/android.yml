@@ -133,6 +133,9 @@ jobs:
           echo "Verified app/google-services.json is ready for build."
 
       - name: Build Release APK with Gradle
+        env:
+          SUPABASE_PUBLIC_URL: ${{ secrets.SUPABASE_PUBLIC_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
         run: ./gradlew assembleRelease -PversionCode=${{ github.run_number }} -PversionName=${{ env.RAW_VERSION }} --stacktrace
 
       - name: Align, sign & package universal APK
