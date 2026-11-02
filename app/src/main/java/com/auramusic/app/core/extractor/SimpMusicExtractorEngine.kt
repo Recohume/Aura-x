@@ -529,7 +529,9 @@ object SimpMusicExtractorEngine {
                 .substringBefore("-")
                 .trim()
 
-            val query = "$cleanArtist $cleanTitle official music video"
+            val titleForQuery = cleanTitle.ifBlank { track.title }
+            val artistForQuery = cleanArtist.ifBlank { track.artist }
+            val query = "$titleForQuery $artistForQuery Music Video Official".trim()
 
             // 1. Search YouTube Music with video filter
             val results = searchYouTubeMusic(query, filter = "videos")

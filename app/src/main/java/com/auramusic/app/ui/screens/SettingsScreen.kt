@@ -98,7 +98,7 @@ fun SettingsScreen(viewModel: AuraViewModel) {
         }
     }
 
-    val appVersionName = packageInfo?.versionName ?: "1.4.2"
+    val appVersionName = packageInfo?.versionName ?: "1.4.3"
     val appVersionCode = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
         packageInfo?.longVersionCode ?: 1L
     } else {
@@ -175,21 +175,7 @@ fun SettingsScreen(viewModel: AuraViewModel) {
             ModernSettingsRow(
                 icon = Icons.Rounded.Speed,
                 title = "Audio Stream Quality",
-                subtitle = "Up to 256kbps direct stream (Opus / AAC)",
-                trailingContent = {
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = Color.White.copy(alpha = 0.08f)
-                    ) {
-                        Text(
-                            text = "Lossless",
-                            color = Color.White.copy(alpha = 0.90f),
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                        )
-                    }
-                }
+                subtitle = "Up to 256kbps direct stream (Opus / AAC)"
             )
 
             SettingsDivider()

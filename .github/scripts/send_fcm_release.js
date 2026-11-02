@@ -31,7 +31,7 @@ async function main() {
     process.exit(0);
   }
 
-  const rawVersion = (process.env.RAW_VERSION || "1.4.2").trim().replace(/^v/i, "");
+  const rawVersion = (process.env.RAW_VERSION || "1.4.3").trim().replace(/^v/i, "");
   const versionTag = (process.env.VERSION || `v${rawVersion}`).trim();
 
   console.log(`Generating Google OAuth2 token for service account: ${clientEmail}`);
@@ -73,18 +73,22 @@ async function main() {
 
   console.log(`Successfully acquired Google OAuth token. Broadcasting release ${versionTag} to topic 'releases'...`);
 
+  const mascotImageUrl = "https://raw.githubusercontent.com/jlfuertes14/Aura-Music/main/app/src/main/res/drawable/aura_bunny_mascot.png";
+
   const fcmPayload = {
     message: {
       topic: "releases",
       notification: {
         title: `Aura ${versionTag} is available!`,
-        body: "A new version of Aura is ready. Tap to download and install!"
+        body: "A new version of Aura is ready. Tap to download and install!",
+        image: mascotImageUrl
       },
       data: {
         type: "release",
         version: rawVersion,
         title: `Aura ${versionTag}`,
-        body: "A new version of Aura is available!"
+        body: "A new version of Aura is available!",
+        image: mascotImageUrl
       },
       android: {
         priority: "high",
@@ -92,7 +96,8 @@ async function main() {
           channel_id: "aura_music_updates",
           click_action: "com.auramusic.app.OPEN_UPDATE",
           default_sound: true,
-          notification_priority: "PRIORITY_HIGH"
+          notification_priority: "PRIORITY_HIGH",
+          image: mascotImageUrl
         }
       }
     }

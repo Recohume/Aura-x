@@ -29,9 +29,9 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -183,86 +183,109 @@ fun AuraCreatePlaylistModal(
 
             Spacer(modifier = Modifier.height(18.dp))
 
-            // Cover Image Box with Tap to Pick
-            Box(
-                modifier = Modifier
-                    .size(130.dp)
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(SpotifyCard)
-                    .clickable { mediaPickerLauncher.launch("image/*") },
-                contentAlignment = Alignment.Center
+            // Main Row: Left = Cover Image Box, Right = Stacked Title & Description
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+                verticalAlignment = Alignment.Top
             ) {
-                if (pickedCoverUri != null) {
-                    AsyncImage(
-                        model = pickedCoverUri,
-                        contentDescription = "Cover Image",
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier.fillMaxSize()
-                    )
-                } else {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.AddPhotoAlternate,
-                            contentDescription = "Pick Cover",
-                            tint = Color.White.copy(alpha = 0.7f),
-                            modifier = Modifier.size(36.dp)
+                // Left: Cover Image Box with Tap to Pick
+                Box(
+                    modifier = Modifier
+                        .size(110.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(SpotifyCard)
+                        .clickable { mediaPickerLauncher.launch("image/*") },
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (pickedCoverUri != null) {
+                        AsyncImage(
+                            model = pickedCoverUri,
+                            contentDescription = "Cover Image",
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize()
                         )
-                        Text(
-                            text = "Add Cover",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = Color.White.copy(alpha = 0.7f)
-                        )
+                    } else {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.AddPhotoAlternate,
+                                contentDescription = "Pick Cover",
+                                tint = Color.White.copy(alpha = 0.7f),
+                                modifier = Modifier.size(32.dp)
+                            )
+                            Text(
+                                text = "Add Cover",
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = Color.White.copy(alpha = 0.7f)
+                            )
+                        }
                     }
+                }
+
+                // Right: Stacked Title & Description Fields (No border width or border color)
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    // Playlist Title Field (Borderless)
+                    TextField(
+                        value = title,
+                        onValueChange = { title = it },
+                        placeholder = {
+                            Text(
+                                text = "Playlist Title",
+                                color = Color.White.copy(alpha = 0.40f),
+                                fontSize = 14.sp
+                            )
+                        },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(10.dp),
+                        colors = TextFieldDefaults.colors(
+                            focusedContainerColor = Color.White.copy(alpha = 0.08f),
+                            unfocusedContainerColor = Color.White.copy(alpha = 0.05f),
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White,
+                            focusedIndicatorColor = Color.Transparent,
+                            unfocusedIndicatorColor = Color.Transparent,
+                            disabledIndicatorColor = Color.Transparent,
+                            cursorColor = AuraNeonLime
+                        )
+                    )
+
+                    // Playlist Description Field (Borderless)
+                    TextField(
+                        value = description,
+                        onValueChange = { description = it },
+                        placeholder = {
+                            Text(
+                                text = "Description (Optional)",
+                                color = Color.White.copy(alpha = 0.35f),
+                                fontSize = 13.sp
+                            )
+                        },
+                        maxLines = 2,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(10.dp),
+                        colors = TextFieldDefaults.colors(
+                            focusedContainerColor = Color.White.copy(alpha = 0.08f),
+                            unfocusedContainerColor = Color.White.copy(alpha = 0.05f),
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White,
+                            focusedIndicatorColor = Color.Transparent,
+                            unfocusedIndicatorColor = Color.Transparent,
+                            disabledIndicatorColor = Color.Transparent,
+                            cursorColor = AuraNeonLime
+                        )
+                    )
                 }
             }
 
-            Spacer(modifier = Modifier.height(20.dp))
-
-            // Playlist Title Field
-            OutlinedTextField(
-                value = title,
-                onValueChange = { title = it },
-                label = { Text("Playlist Title", color = Color.White.copy(alpha = 0.6f)) },
-                placeholder = { Text("My Awesome Playlist", color = Color.White.copy(alpha = 0.3f)) },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = AuraNeonLime,
-                    unfocusedBorderColor = Color.White.copy(alpha = 0.15f),
-                    focusedTextColor = Color.White,
-                    unfocusedTextColor = Color.White,
-                    focusedLabelColor = AuraNeonLime,
-                    cursorColor = AuraNeonLime
-                )
-            )
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // Playlist Description Field
-            OutlinedTextField(
-                value = description,
-                onValueChange = { description = it },
-                label = { Text("Description (Optional)", color = Color.White.copy(alpha = 0.6f)) },
-                placeholder = { Text("Give your playlist a cool vibe…", color = Color.White.copy(alpha = 0.3f)) },
-                maxLines = 3,
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = AuraNeonLime,
-                    unfocusedBorderColor = Color.White.copy(alpha = 0.15f),
-                    focusedTextColor = Color.White,
-                    unfocusedTextColor = Color.White,
-                    focusedLabelColor = AuraNeonLime,
-                    cursorColor = AuraNeonLime
-                )
-            )
-
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(22.dp))
 
             // Action: Create Button
             Button(

@@ -1112,24 +1112,6 @@ private fun ArtistSearchResultHeader(
                 overflow = TextOverflow.Ellipsis
             )
         }
-
-        // "Follow" Pill Button
-        Surface(
-            shape = RoundedCornerShape(percent = 50),
-            color = Color.Transparent,
-            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.60f)),
-            modifier = Modifier
-                .clip(RoundedCornerShape(percent = 50))
-                .clickable(onClick = onClick)
-        ) {
-            Text(
-                text = "Follow",
-                color = Color.White,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
-            )
-        }
     }
 }
 

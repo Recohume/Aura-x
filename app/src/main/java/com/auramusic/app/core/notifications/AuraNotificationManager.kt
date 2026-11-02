@@ -6,6 +6,7 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
+import android.graphics.BitmapFactory
 import android.os.Build
 import android.util.Log
 import androidx.core.app.NotificationCompat
@@ -158,8 +159,8 @@ object AuraNotificationManager {
         try {
             val deviceId = getOrCreateDeviceId(context)
             val appVersion = try {
-                context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "1.4.2"
-            } catch (_: Exception) { "1.4.2" }
+                context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "1.4.3"
+            } catch (_: Exception) { "1.4.3" }
 
             val payload = JSONObject().apply {
                 put("device_id", deviceId)
@@ -224,8 +225,20 @@ object AuraNotificationManager {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
+        val mascotBitmap = try {
+            BitmapFactory.decodeResource(context.resources, R.drawable.aura_bunny_mascot)
+                ?: BitmapFactory.decodeResource(context.resources, R.drawable.aura_logo)
+        } catch (_: Exception) {
+            null
+        }
+
         val notification = NotificationCompat.Builder(context, CHANNEL_UPDATES_ID)
             .setSmallIcon(R.mipmap.ic_launcher)
+            .apply {
+                if (mascotBitmap != null) {
+                    setLargeIcon(mascotBitmap)
+                }
+            }
             .setContentTitle(title)
             .setContentText(message)
             .setStyle(NotificationCompat.BigTextStyle().bigText(message))

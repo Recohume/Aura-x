@@ -691,8 +691,8 @@ private fun NowPlayingOptionsModal(
     onAddToPlaylist: () -> Unit = {},
     onPlayNext: () -> Unit,
     onAddToQueue: () -> Unit,
-    onOpenQueue: () -> Unit,
-    onOpenLyrics: () -> Unit,
+    onOpenQueue: () -> Unit = {},
+    onOpenLyrics: () -> Unit = {},
     isDownloaded: Boolean = false,
     isDownloading: Boolean = false,
     onDownloadTrack: (() -> Unit)? = null,
@@ -775,7 +775,7 @@ private fun NowPlayingOptionsModal(
             } else if (onDownloadTrack != null) {
                 NowPlayingModalOptionRow(
                     icon = if (isDownloaded) Icons.Rounded.DeleteOutline else Icons.Rounded.Download,
-                    label = if (isDownloading) "Downloading..." else if (isDownloaded) "Remove from Downloads" else "Download Song",
+                    label = if (isDownloading) "Downloading…" else if (isDownloaded) "Remove from Downloads" else "Download Song",
                     onClick = {
                         if (isDownloaded && onRemoveDownload != null) {
                             onRemoveDownload()
@@ -834,20 +834,6 @@ private fun NowPlayingOptionsModal(
                 icon = Icons.Rounded.PlaylistAdd,
                 label = "Add to Queue",
                 onClick = onAddToQueue
-            )
-
-            // 8. View Queue
-            NowPlayingModalOptionRow(
-                icon = Icons.AutoMirrored.Rounded.QueueMusic,
-                label = "Upcoming Queue",
-                onClick = onOpenQueue
-            )
-
-            // 9. Full Screen Lyrics
-            NowPlayingModalOptionRow(
-                icon = Icons.AutoMirrored.Rounded.Comment,
-                label = "Lyrics View",
-                onClick = onOpenLyrics
             )
 
             Spacer(modifier = Modifier.height(24.dp))

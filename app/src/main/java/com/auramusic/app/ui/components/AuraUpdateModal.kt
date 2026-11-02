@@ -162,13 +162,12 @@ fun AuraUpdateModal(
                     },
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                // Flat, larger Mascot Logo without border outline
+                // Flat, enlarged Mascot Logo without circular outline/badge
                 Image(
-                    painter = painterResource(id = R.drawable.aura_logo),
-                    contentDescription = "Aura Logo",
+                    painter = painterResource(id = R.drawable.aura_bunny_mascot),
+                    contentDescription = "Aura Mascot",
                     modifier = Modifier
-                        .size(96.dp)
-                        .clip(CircleShape)
+                        .size(112.dp)
                 )
 
                 Spacer(modifier = Modifier.height(10.dp))
@@ -205,8 +204,8 @@ fun AuraUpdateModal(
                 Spacer(modifier = Modifier.height(8.dp))
 
                 // Version Diff Text Row (matching Yomite minimal inline design: no pill border/background)
-                val cleanCurrent = currentVersion.trim().removePrefix("v").removePrefix("V").ifBlank { "1.4.1" }
-                val cleanRemote = release.version.trim().removePrefix("v").removePrefix("V").ifBlank { "1.4.2" }
+                val cleanCurrent = currentVersion.trim().removePrefix("v").removePrefix("V").ifBlank { "1.4.2" }
+                val cleanRemote = release.version.trim().removePrefix("v").removePrefix("V").ifBlank { "1.4.3" }
 
                 Row(
                     modifier = Modifier.padding(top = 6.dp),
@@ -555,6 +554,10 @@ private fun MarkdownChangelogView(content: String) {
                             modifier = Modifier.padding(top = 10.dp, bottom = 4.dp)
                         )
                     }
+                }
+
+                trimmed.startsWith("Aura v", ignoreCase = true) || trimmed.startsWith("Version v", ignoreCase = true) -> {
+                    // Suppress redundant version headers that might not have a leading '#'
                 }
 
                 trimmed.startsWith("## ") -> {

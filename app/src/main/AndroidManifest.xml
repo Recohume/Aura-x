@@ -84,6 +84,11 @@
                 android:resource="@xml/file_paths" />
         </provider>
 
+        <!-- Firebase Cloud Messaging Defaults -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="aura_music_updates" />
+
         <!-- Firebase Cloud Messaging Receiver Service -->
         <service
             android:name=".core.notifications.AuraFirebaseMessagingService"

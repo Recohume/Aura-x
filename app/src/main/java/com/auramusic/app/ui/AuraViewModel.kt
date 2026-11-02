@@ -833,32 +833,34 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
      */
     fun triggerTestUpdateModal() {
         val testRelease = AuraReleaseInfo(
-            version = "1.4.2",
-            tagName = "v1.4.2",
-            releaseTitle = "Aura v1.4.2 • In-App Update Engine Stability & UI Polish",
+            version = "1.4.3",
+            tagName = "v1.4.3",
+            releaseTitle = "Aura v1.4.3 • Flatter Mascot, Search & Video Engine Enhancements",
             releaseNotes = """
-# Aura v1.4.2
+# Aura v1.4.3
 
-Release Tags: [release, v1.4.2, android, kotlin, jetpack-compose, in-app-update, bugfix, stability]
+Release Tags: [release, v1.4.3, android, kotlin, jetpack-compose, in-app-update, bugfix, ui-polish]
 
 ---
 
 ## Overview
 
-Aura v1.4.2 resolves a crash during direct in-app update downloading, removes redundant circular mascot outlines, and cleans up release changelog formatting.
+Aura v1.4.3 introduces a flat borderless mascot logo in the update modal, fixes duplicate changelog headers, enhances official music video discovery, adds mascot icons to push notifications, streamlines player options, and revamps the playlist creation sheet.
 
 ---
 
 ## What's Changed
 
-- **In-App Update Engine Crash Fixes**:
-  - Fixed `IllegalFormatFlagsException: Flags ='('` during download progress updates by isolating numeric formatting from percentage labels.
-  - Eliminated duplicate version titles under "WHAT'S NEW" in the update modal.
-  - Redesigned the update modal mascot logo to be flat and borderless with an enlarged 96dp footprint.
-  - Optimized background update check cadence to 15 minutes.
+- **Flat Mascot Logo**: Removed circular outline and enlarged the mascot to 112dp.
+- **Deduplicated Changelog**: Suppressed redundant version headers in release notes.
+- **Accurate Official Video Search**: Re-indexed search query to prioritize exact music videos.
+- **Push Notification Mascot Icon**: Shows the Aura mascot as a large notification icon.
+- **Full-Screen Player Cleanup**: Streamlined 3-dot options menu.
+- **Create Playlist Modal**: Modern borderless fields with horizontal cover image layout.
+- **Search Header**: Removed the follow button from artist search results.
             """.trimIndent(),
             downloadUrl = "https://github.com/jlfuertes14/Aura-Music/releases",
-            fileName = "aura-music-v1.4.2-universal.apk",
+            fileName = "aura-music-v1.4.3-universal.apk",
             apkSize = 34_820_000L,
             publishedAt = "2026-11-02T12:00:00Z",
             htmlUrl = "https://github.com/jlfuertes14/Aura-Music/releases"
