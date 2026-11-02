@@ -279,7 +279,10 @@ fun AuraMainScreen(viewModel: AuraViewModel) {
                     onPlayMood = { mood -> viewModel.playMoodCategory(mood) },
                     onToggleFavorite = { track -> viewModel.toggleFavorite(track) },
                     onDownloadTrack = { track -> requestDownloadWithPermission { viewModel.downloadTrack(track) } },
-                    onRefresh = { viewModel.refreshHome() }
+                    onRefresh = { viewModel.refreshHome() },
+                    onOpenArtistByName = { artistName, songTitle -> viewModel.openArtistByName(artistName, songTitle) },
+                    onAddTrackToPlaylist = { plId, track -> viewModel.addTrackToPlaylist(plId, track) },
+                    onCreatePlaylist = { name, desc, cover -> viewModel.createPlaylist(name, desc, cover) }
                 )
                 1 -> SearchScreen(
                     query = searchQuery,

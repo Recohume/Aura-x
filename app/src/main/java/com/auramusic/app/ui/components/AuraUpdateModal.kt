@@ -163,11 +163,11 @@ fun AuraUpdateModal(
                     },
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                // Circled App Icon from assets/icon.png
+                // Circled App Icon from assets/icon.png directly matching APK round icon
                 Image(
-                    painter = painterResource(id = R.drawable.aura_logo),
-                    contentDescription = "Aura Mascot",
-                    contentScale = ContentScale.Crop,
+                    painter = painterResource(id = R.drawable.aura_app_icon_round),
+                    contentDescription = "Aura App Icon",
+                    contentScale = ContentScale.Fit,
                     modifier = Modifier
                         .size(104.dp)
                         .clip(CircleShape)
@@ -207,8 +207,8 @@ fun AuraUpdateModal(
                 Spacer(modifier = Modifier.height(8.dp))
 
                 // Version Diff Text Row (matching Yomite minimal inline design: no pill border/background)
-                val cleanCurrent = currentVersion.trim().removePrefix("v").removePrefix("V").ifBlank { "1.4.5" }
-                val cleanRemote = release.version.trim().removePrefix("v").removePrefix("V").ifBlank { "1.4.6" }
+                val cleanCurrent = currentVersion.trim().removePrefix("v").removePrefix("V").ifBlank { "1.4.6" }
+                val cleanRemote = release.version.trim().removePrefix("v").removePrefix("V").ifBlank { "1.4.7" }
 
                 Row(
                     modifier = Modifier.padding(top = 6.dp),

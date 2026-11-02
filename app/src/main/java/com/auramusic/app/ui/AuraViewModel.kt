@@ -936,19 +936,19 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
      */
     fun triggerTestUpdateModal() {
         val testRelease = AuraReleaseInfo(
-            version = "1.4.6",
-            tagName = "v1.4.6",
-            releaseTitle = "Aura v1.4.6 • Circled App Icon, Black Downloading Pill & Playlist Likes/Options",
+            version = "1.4.7",
+            tagName = "v1.4.7",
+            releaseTitle = "Aura v1.4.7 • Circled APK Icon, Borderless Playlist Controls & Home Song 3-Dot Options",
             releaseNotes = """
-# Aura v1.4.6
+# Aura v1.4.7
 
-Release Tags: [release, v1.4.6, android, kotlin, jetpack-compose, in-app-update, playlist-like, playlist-options]
+Release Tags: [release, v1.4.7, android, kotlin, jetpack-compose, in-app-update, playlist-controls, home-options]
 
 ---
 
 ## Overview
 
-Aura v1.4.6 introduces circled app icon branding in push notifications and the in-app update screen, black downloading progress pill typography, and full playlist liking and saving with 3-dot options across Search and Playlist Details.
+Aura v1.4.7 establishes exact circular APK icon branding in the in-app update experience and system notifications, refines playlist and album action controls with borderless icons and dynamic Shuffle/Repeat swap, and replaces redundant circular play buttons on Home screen song tiles with standardized 3-dot options.
 
 ---
 

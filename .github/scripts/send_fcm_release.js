@@ -31,7 +31,7 @@ async function main() {
     process.exit(0);
   }
 
-  const rawVersion = (process.env.RAW_VERSION || "1.4.6").trim().replace(/^v/i, "");
+  const rawVersion = (process.env.RAW_VERSION || "1.4.7").trim().replace(/^v/i, "");
   const versionTag = (process.env.VERSION || `v${rawVersion}`).trim();
 
   console.log(`Generating Google OAuth2 token for service account: ${clientEmail}`);

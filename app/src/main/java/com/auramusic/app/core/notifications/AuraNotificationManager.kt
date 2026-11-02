@@ -165,8 +165,8 @@ object AuraNotificationManager {
         try {
             val deviceId = getOrCreateDeviceId(context)
             val appVersion = try {
-                context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "1.4.6"
-            } catch (_: Exception) { "1.4.6" }
+                context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "1.4.7"
+            } catch (_: Exception) { "1.4.7" }
 
             val payload = JSONObject().apply {
                 put("device_id", deviceId)
@@ -259,12 +259,14 @@ object AuraNotificationManager {
     }
 
     /**
-     * Renders R.drawable.aura_logo (assets/icon.png) into a crisp anti-aliased circular Bitmap
+     * Renders R.drawable.aura_app_icon_round (assets/icon.png) into a crisp circular Bitmap
      * for the right-side notification thumbnail (setLargeIcon) without BigPicture expansion.
      */
     private fun createCircularLogoBitmap(context: Context): Bitmap? {
         return try {
-            val raw = BitmapFactory.decodeResource(context.resources, R.drawable.aura_logo) ?: return null
+            val raw = BitmapFactory.decodeResource(context.resources, R.drawable.aura_app_icon_round)
+                ?: BitmapFactory.decodeResource(context.resources, R.drawable.aura_logo)
+                ?: return null
             val size = 256
             val scaled = Bitmap.createScaledBitmap(raw, size, size, true)
             val output = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)

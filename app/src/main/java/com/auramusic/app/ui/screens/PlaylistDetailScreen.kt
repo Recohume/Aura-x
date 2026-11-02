@@ -36,6 +36,7 @@ import androidx.compose.material.icons.rounded.LibraryAdd
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.PlaylistAdd
+import androidx.compose.material.icons.rounded.Repeat
 import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -90,6 +91,7 @@ fun PlaylistDetailScreen(
 ) {
     val context = LocalContext.current
     var selectedModalTrack by remember { mutableStateOf<AuraTrack?>(null) }
+    var isRepeatMode by remember { mutableStateOf(false) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     val allTracks = remember(playlistDetail.tracks, playlistDetail.title) {
@@ -235,52 +237,46 @@ fun PlaylistDetailScreen(
                     }
 
                     Row(
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        // Like / Save Playlist Button
-                        Surface(
-                            shape = CircleShape,
-                            color = if (isSaved) AuraNeonLime.copy(alpha = 0.15f) else Color(0xFF1E2028),
-                            border = BorderStroke(1.dp, if (isSaved) AuraNeonLime else Color(0xFF2E323D)),
-                            modifier = Modifier
-                                .size(42.dp)
-                                .clip(CircleShape)
-                                .clickable { onToggleSave() }
+                        // Like / Save Playlist Button (No gray circle fill, no border width, no border color)
+                        IconButton(
+                            onClick = onToggleSave,
+                            modifier = Modifier.size(42.dp)
                         ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(
-                                    imageVector = if (isSaved) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
-                                    contentDescription = if (isSaved) "Remove from Library" else "Save to Library",
-                                    tint = if (isSaved) AuraNeonLime else Color.White,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
+                            Icon(
+                                imageVector = if (isSaved) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
+                                contentDescription = if (isSaved) "Remove from Library" else "Save to Library",
+                                tint = if (isSaved) AuraNeonLime else Color.White,
+                                modifier = Modifier.size(24.dp)
+                            )
                         }
 
                         if (allTracks.isNotEmpty()) {
-                            // Shuffle Button
-                            Surface(
-                                shape = CircleShape,
-                                color = Color(0xFF1E2028),
-                                border = BorderStroke(1.dp, Color(0xFF2E323D)),
-                                modifier = Modifier
-                                    .size(42.dp)
-                                    .clip(CircleShape)
-                                    .clickable {
+                            // Shuffle / Repeat All Button (Swaps when tapped, lime when active, no circle fill, no border)
+                            IconButton(
+                                onClick = {
+                                    if (!isRepeatMode) {
                                         val shuffled = allTracks.shuffled()
                                         onPlayTrack(shuffled.first(), shuffled)
+                                        isRepeatMode = true
+                                    } else {
+                                        onPlayTrack(allTracks.first(), allTracks)
+                                        isRepeatMode = false
                                     }
+                                },
+                                modifier = Modifier.size(42.dp)
                             ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Icon(
-                                        imageVector = Icons.Rounded.Shuffle,
-                                        contentDescription = "Shuffle Playlist",
-                                        tint = Color.White,
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                }
+                                Icon(
+                                    imageVector = if (isRepeatMode) Icons.Rounded.Repeat else Icons.Rounded.Shuffle,
+                                    contentDescription = if (isRepeatMode) "Repeat All" else "Shuffle Playlist",
+                                    tint = if (isRepeatMode) AuraNeonLime else Color.White,
+                                    modifier = Modifier.size(24.dp)
+                                )
                             }
+
+                            Spacer(modifier = Modifier.width(4.dp))
 
                             // Play All Button
                             Surface(

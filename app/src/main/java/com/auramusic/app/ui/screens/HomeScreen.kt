@@ -1,5 +1,12 @@
 package com.auramusic.app.ui.screens
 
+import android.widget.Toast
+import androidx.compose.ui.platform.LocalContext
+import com.auramusic.app.core.media.AuraPlayerManager
+import com.auramusic.app.ui.components.AuraAddToPlaylistModal
+import com.auramusic.app.ui.components.AuraCreatePlaylistModal
+import com.auramusic.app.ui.components.AuraTrackOptionsModal
+
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -129,8 +136,16 @@ fun HomeScreen(
     onPlayMood: (MoodCategory) -> Unit,
     onToggleFavorite: (AuraTrack) -> Unit,
     onDownloadTrack: (AuraTrack) -> Unit,
-    onRefresh: () -> Unit
+    onRefresh: () -> Unit,
+    onOpenArtistByName: (String, String) -> Unit = { _, _ -> },
+    onAddTrackToPlaylist: (String, AuraTrack) -> Unit = { _, _ -> },
+    onCreatePlaylist: (String, String, String) -> Unit = { _, _, _ -> }
 ) {
+    val context = LocalContext.current
+    var selectedTrackForOptions by remember { mutableStateOf<AuraTrack?>(null) }
+    var trackForAddToPlaylist by remember { mutableStateOf<AuraTrack?>(null) }
+    var showCreatePlaylistModal by remember { mutableStateOf(false) }
+
     val liveTopTracks = chartSections.firstOrNull()?.tracks?.ifEmpty { SimpMusicExtractorEngine.DEFAULT_SEED_TRACKS }
         ?: SimpMusicExtractorEngine.DEFAULT_SEED_TRACKS
     val heroTrack = liveTopTracks.firstOrNull()
@@ -550,7 +565,8 @@ fun HomeScreen(
                     downloadProgress = downloadProgressMap[track.videoId],
                     onClick = { onPlayTrack(track, displayedTracks) },
                     onToggleFavorite = { onToggleFavorite(track) },
-                    onDownload = { onDownloadTrack(track) }
+                    onDownload = { onDownloadTrack(track) },
+                    onOptionsClick = { selectedTrackForOptions = track }
                 )
             }
         }
@@ -597,6 +613,71 @@ fun HomeScreen(
                 }
             }
         }
+    }
+
+    // Track Options Modal (Play Next, Add to Queue, Liked Songs, Add to Playlist, Go to Artist)
+    selectedTrackForOptions?.let { modalTrack ->
+        AuraTrackOptionsModal(
+            track = modalTrack,
+            isFavorite = favorites.any { it.videoId == modalTrack.videoId },
+            onDismiss = { selectedTrackForOptions = null },
+            onPlayNext = {
+                AuraPlayerManager.playNext(modalTrack)
+                Toast.makeText(context, "Playing next: ${modalTrack.title}", Toast.LENGTH_SHORT).show()
+                selectedTrackForOptions = null
+            },
+            onAddToQueue = {
+                AuraPlayerManager.enqueueTrack(modalTrack)
+                Toast.makeText(context, "Added to queue: ${modalTrack.title}", Toast.LENGTH_SHORT).show()
+                selectedTrackForOptions = null
+            },
+            onToggleFavorite = {
+                val wasFav = favorites.any { it.videoId == modalTrack.videoId }
+                onToggleFavorite(modalTrack)
+                val msg = if (wasFav) "Removed from Liked Songs" else "Added to Liked Songs"
+                Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                selectedTrackForOptions = null
+            },
+            onAddToPlaylist = {
+                val t = modalTrack
+                selectedTrackForOptions = null
+                trackForAddToPlaylist = t
+            },
+            onGoToArtist = {
+                selectedTrackForOptions = null
+                onOpenArtistByName(modalTrack.artist, modalTrack.title)
+            }
+        )
+    }
+
+    // Modal: Add Song to Playlist
+    trackForAddToPlaylist?.let { trackToAdd ->
+        AuraAddToPlaylistModal(
+            track = trackToAdd,
+            playlists = userPlaylists,
+            onDismiss = { trackForAddToPlaylist = null },
+            onSelectPlaylist = { targetPl ->
+                onAddTrackToPlaylist(targetPl.id, trackToAdd)
+                trackForAddToPlaylist = null
+                Toast.makeText(context, "Added '${trackToAdd.title}' to '${targetPl.name}'", Toast.LENGTH_SHORT).show()
+            },
+            onCreateNewPlaylist = {
+                trackForAddToPlaylist = null
+                showCreatePlaylistModal = true
+            }
+        )
+    }
+
+    // Modal: Create Playlist on the fly
+    if (showCreatePlaylistModal) {
+        AuraCreatePlaylistModal(
+            onDismiss = { showCreatePlaylistModal = false },
+            onCreate = { title, desc, coverUri ->
+                showCreatePlaylistModal = false
+                onCreatePlaylist(title, desc, coverUri)
+                Toast.makeText(context, "Created playlist: $title", Toast.LENGTH_SHORT).show()
+            }
+        )
     }
 }
 
@@ -1016,35 +1097,16 @@ fun SpotifyTrackRowItem(
 
         Spacer(modifier = Modifier.width(8.dp))
 
-        if (onOptionsClick != null) {
-            IconButton(
-                onClick = onOptionsClick,
-                modifier = Modifier.size(38.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Rounded.MoreVert,
-                    contentDescription = "Options for ${track.title}",
-                    tint = TextSecondary,
-                    modifier = Modifier.size(20.dp)
-                )
-            }
-        } else {
-            // Circular Play Button matching the reference
-            Box(
-                modifier = Modifier
-                    .size(38.dp)
-                    .clip(CircleShape)
-                    .background(if (isCurrent) AuraNeonLime else AuraCircleButtonBg)
-                    .clickable(onClick = onClick),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = if (isCurrent) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                    contentDescription = "Play",
-                    tint = if (isCurrent) Color.Black else Color.White,
-                    modifier = Modifier.size(18.dp)
-                )
-            }
+        IconButton(
+            onClick = { onOptionsClick?.invoke() },
+            modifier = Modifier.size(38.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.MoreVert,
+                contentDescription = "Options for ${track.title}",
+                tint = TextSecondary,
+                modifier = Modifier.size(20.dp)
+            )
         }
     }
 }
