@@ -162,23 +162,14 @@ fun AuraUpdateModal(
                     },
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                // Circular Mascot Logo
-                Box(
+                // Flat, larger Mascot Logo without border outline
+                Image(
+                    painter = painterResource(id = R.drawable.aura_logo),
+                    contentDescription = "Aura Logo",
                     modifier = Modifier
-                        .size(80.dp)
+                        .size(96.dp)
                         .clip(CircleShape)
-                        .background(CardSurfaceBg)
-                        .border(1.5.dp, Color(0xFF2E3240), CircleShape),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Image(
-                        painter = painterResource(id = R.drawable.aura_logo),
-                        contentDescription = "Aura Logo",
-                        modifier = Modifier
-                            .size(64.dp)
-                            .clip(CircleShape)
-                    )
-                }
+                )
 
                 Spacer(modifier = Modifier.height(10.dp))
 
@@ -214,8 +205,8 @@ fun AuraUpdateModal(
                 Spacer(modifier = Modifier.height(8.dp))
 
                 // Version Diff Text Row (matching Yomite minimal inline design: no pill border/background)
-                val cleanCurrent = currentVersion.trim().removePrefix("v").removePrefix("V").ifBlank { "1.4" }
-                val cleanRemote = release.version.trim().removePrefix("v").removePrefix("V").ifBlank { "1.4.1" }
+                val cleanCurrent = currentVersion.trim().removePrefix("v").removePrefix("V").ifBlank { "1.4.1" }
+                val cleanRemote = release.version.trim().removePrefix("v").removePrefix("V").ifBlank { "1.4.2" }
 
                 Row(
                     modifier = Modifier.padding(top = 6.dp),
@@ -412,7 +403,9 @@ fun AuraUpdateModal(
                             val downloadedMb = downloadProgress.writtenBytes / (1024f * 1024f)
                             val totalMb = downloadProgress.totalBytes / (1024f * 1024f)
                             val progressLabel = if (totalMb > 0f) {
-                                "Downloading $percent% (%.1f / %.1f MB)".format(downloadedMb, totalMb)
+                                val downloadedStr = String.format(java.util.Locale.US, "%.1f", downloadedMb)
+                                val totalStr = String.format(java.util.Locale.US, "%.1f", totalMb)
+                                "Downloading $percent% ($downloadedStr / $totalStr MB)"
                             } else {
                                 "Downloading $percent%"
                             }
@@ -552,13 +545,16 @@ private fun MarkdownChangelogView(content: String) {
 
                 trimmed.startsWith("# ") -> {
                     val title = trimmed.removePrefix("# ").trim()
-                    Text(
-                        text = title,
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White,
-                        modifier = Modifier.padding(top = 10.dp, bottom = 4.dp)
-                    )
+                    // Filter out redundant version titles since the modal sheet already prominently displays "Version vX.X" at the top
+                    if (!title.startsWith("Aura", ignoreCase = true) && !title.startsWith("Version", ignoreCase = true)) {
+                        Text(
+                            text = title,
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White,
+                            modifier = Modifier.padding(top = 10.dp, bottom = 4.dp)
+                        )
+                    }
                 }
 
                 trimmed.startsWith("## ") -> {

@@ -52,7 +52,7 @@ object AuraUpdateManager {
     private const val KEY_SNOOZED_VERSION = "snoozed_version"
     private const val KEY_SNOOZED_UNTIL_MS = "snoozed_until_ms"
 
-    private const val CHECK_CADENCE_MS = 12 * 60 * 60 * 1000L // 12 hours
+    private const val CHECK_CADENCE_MS = 15 * 60 * 1000L // 15 minutes
     private const val SNOOZE_DURATION_MS = 24 * 60 * 60 * 1000L // 24 hours
 
     private fun getPrefs(context: Context): SharedPreferences {

@@ -98,7 +98,7 @@ fun SettingsScreen(viewModel: AuraViewModel) {
         }
     }
 
-    val appVersionName = packageInfo?.versionName ?: "1.4.1"
+    val appVersionName = packageInfo?.versionName ?: "1.4.2"
     val appVersionCode = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
         packageInfo?.longVersionCode ?: 1L
     } else {

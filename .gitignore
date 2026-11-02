@@ -19,6 +19,7 @@ build/
 
 # Gradle files
 .gradle/
+.kotlin/
 
 # Local configuration file (contains SDK path and local machine settings)
 local.properties

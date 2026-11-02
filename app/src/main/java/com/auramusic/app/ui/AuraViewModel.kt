@@ -833,32 +833,32 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
      */
     fun triggerTestUpdateModal() {
         val testRelease = AuraReleaseInfo(
-            version = "1.4.1",
-            tagName = "v1.4.1",
-            releaseTitle = "Aura v1.4.1 • In-App Update Stability & Minor Fixes",
+            version = "1.4.2",
+            tagName = "v1.4.2",
+            releaseTitle = "Aura v1.4.2 • In-App Update Engine Stability & UI Polish",
             releaseNotes = """
-# Aura v1.4.1
+# Aura v1.4.2
 
-Release Tags: [release, v1.4.1, android, kotlin, jetpack-compose, in-app-update, bugfix]
+Release Tags: [release, v1.4.2, android, kotlin, jetpack-compose, in-app-update, bugfix, stability]
 
 ---
 
 ## Overview
 
-Aura v1.4.1 is a stability release addressing the direct in-app update installation engine, eliminating corner calculation exceptions during download animations, and polishing the release notes changelog layout.
+Aura v1.4.2 resolves a crash during direct in-app update downloading, removes redundant circular mascot outlines, and cleans up release changelog formatting.
 
 ---
 
 ## What's Changed
 
-- **In-App OTA Update Engine Stability**:
-  - Resolved `IllegalArgumentException` (negative corner size in px) caused by spring animation undershoot during APK download progress fill.
-  - Replaced spring spec with monotonic `LinearOutSlowInEasing` tween animation and clamped progress strictly in `0f..1f`.
-  - Removed redundant nested capsule clips on the progress fill layer, preventing geometry computation issues on fractional widths.
-  - Eliminated duplicate version header in the update changelog modal.
+- **In-App Update Engine Crash Fixes**:
+  - Fixed `IllegalFormatFlagsException: Flags ='('` during download progress updates by isolating numeric formatting from percentage labels.
+  - Eliminated duplicate version titles under "WHAT'S NEW" in the update modal.
+  - Redesigned the update modal mascot logo to be flat and borderless with an enlarged 96dp footprint.
+  - Optimized background update check cadence to 15 minutes.
             """.trimIndent(),
             downloadUrl = "https://github.com/jlfuertes14/Aura-Music/releases",
-            fileName = "aura-music-v1.4.1-universal.apk",
+            fileName = "aura-music-v1.4.2-universal.apk",
             apkSize = 34_820_000L,
             publishedAt = "2026-11-02T12:00:00Z",
             htmlUrl = "https://github.com/jlfuertes14/Aura-Music/releases"
