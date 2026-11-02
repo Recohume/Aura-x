@@ -188,3 +188,12 @@ jobs:
             dist/aura-music-${{ env.VERSION }}-universal.apk.sha256
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Dispatch FCM Release Notification
+        if: startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main' || github.event.inputs.create_release == true
+        shell: bash
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT || secrets.FIREBASE_KEY }}
+          VERSION: ${{ env.VERSION }}
+          RAW_VERSION: ${{ env.RAW_VERSION }}
+        run: node .github/scripts/send_fcm_release.js
