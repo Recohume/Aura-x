@@ -106,6 +106,9 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
     private val _artistFeaturingItems = MutableStateFlow<List<ArtistCarouselItem>>(emptyList())
     val artistFeaturingItems: StateFlow<List<ArtistCarouselItem>> = _artistFeaturingItems.asStateFlow()
 
+    private val _searchPlaylistResults = MutableStateFlow<List<YtmCommunityPlaylist>>(emptyList())
+    val searchPlaylistResults: StateFlow<List<YtmCommunityPlaylist>> = _searchPlaylistResults.asStateFlow()
+
     private val _spotifyImportStatus = MutableStateFlow<String?>(null)
     val spotifyImportStatus: StateFlow<String?> = _spotifyImportStatus.asStateFlow()
 
@@ -397,6 +400,7 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
             _searchMatchedArtist.value = null
             _searchMatchedArtists.value = emptyList()
             _artistFeaturingItems.value = emptyList()
+            _searchPlaylistResults.value = emptyList()
             _searchResults.value = _chartSections.value.firstOrNull()?.tracks
                 ?: SimpMusicExtractorEngine.DEFAULT_SEED_TRACKS
             return
@@ -407,6 +411,19 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
             _searchMatchedArtist.value = null
             _searchMatchedArtists.value = emptyList()
             _artistFeaturingItems.value = emptyList()
+            _searchPlaylistResults.value = emptyList()
+
+            // If Playlists filter pill is active, fetch ONLY playlists (no songs, no artist featuring shelf)
+            if (_searchFilter.value == "playlists") {
+                val playlists = try {
+                    SimpMusicExtractorEngine.fetchCommunityPlaylists(query.trim())
+                } catch (_: Exception) {
+                    emptyList()
+                }
+                _searchPlaylistResults.value = playlists
+                _isSearching.value = false
+                return@launch
+            }
 
             // Parallel artist search for top artist card, artist list & featuring carousels
             val artistDeferred = async {
@@ -833,19 +850,19 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
      */
     fun triggerTestUpdateModal() {
         val testRelease = AuraReleaseInfo(
-            version = "1.4.4",
-            tagName = "v1.4.4",
-            releaseTitle = "Aura v1.4.4 • Permanent Signing Keystore & Notification Mascot Polish",
+            version = "1.4.5",
+            tagName = "v1.4.5",
+            releaseTitle = "Aura v1.4.5 • Playlist Player Header, Notification Mascot Thumbnail & Search Playlists Filter",
             releaseNotes = """
-# Aura v1.4.4
+# Aura v1.4.5
 
-Release Tags: [release, v1.4.4, android, kotlin, jetpack-compose, in-app-update, keystore, notifications, ui-polish]
+Release Tags: [release, v1.4.5, android, kotlin, jetpack-compose, in-app-update, notifications, search-filter, playlist-header]
 
 ---
 
 ## Overview
 
-Aura v1.4.4 establishes a permanent repository release keystore to eliminate package conflict installation errors on Android, refines notification icons with a custom monochrome mascot silhouette, and standardizes in-app update delivery.
+Aura v1.4.5 delivers playlist title display fixes in the full-screen player header, push notification mascot rendering with a circular thumbnail and direct deep-linking into update installation, and accurate playlist search filtering.
 
 ---
 

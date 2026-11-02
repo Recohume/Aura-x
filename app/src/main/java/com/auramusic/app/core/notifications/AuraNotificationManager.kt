@@ -6,7 +6,11 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Canvas
+import android.graphics.Paint
+import android.graphics.Path
 import android.os.Build
 import android.util.Log
 import androidx.core.app.NotificationCompat
@@ -159,8 +163,8 @@ object AuraNotificationManager {
         try {
             val deviceId = getOrCreateDeviceId(context)
             val appVersion = try {
-                context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "1.4.4"
-            } catch (_: Exception) { "1.4.4" }
+                context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "1.4.5"
+            } catch (_: Exception) { "1.4.5" }
 
             val payload = JSONObject().apply {
                 put("device_id", deviceId)
@@ -213,8 +217,10 @@ object AuraNotificationManager {
         createChannels(context)
 
         val intent = Intent(context, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            action = "com.auramusic.app.OPEN_UPDATE"
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
             putExtra(EXTRA_OPEN_UPDATE, true)
+            putExtra("type", "release")
             putExtra("update_version", version)
         }
 
@@ -225,18 +231,13 @@ object AuraNotificationManager {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val mascotBitmap = try {
-            BitmapFactory.decodeResource(context.resources, R.drawable.aura_bunny_mascot)
-                ?: BitmapFactory.decodeResource(context.resources, R.drawable.aura_logo)
-        } catch (_: Exception) {
-            null
-        }
+        val circleLogoBitmap = createCircularLogoBitmap(context)
 
         val notification = NotificationCompat.Builder(context, CHANNEL_UPDATES_ID)
             .setSmallIcon(R.drawable.ic_aura_notification)
             .apply {
-                if (mascotBitmap != null) {
-                    setLargeIcon(mascotBitmap)
+                if (circleLogoBitmap != null) {
+                    setLargeIcon(circleLogoBitmap)
                 }
             }
             .setContentTitle(title)
@@ -252,6 +253,31 @@ object AuraNotificationManager {
             NotificationManagerCompat.from(context).notify(NOTIFICATION_UPDATE_ID, notification)
         } catch (e: SecurityException) {
             Log.w(TAG, "Notification permission not granted: ${e.message}")
+        }
+    }
+
+    /**
+     * Renders R.drawable.aura_logo into a crisp anti-aliased circular Bitmap
+     * for the right-side notification thumbnail (setLargeIcon) without BigPicture expansion.
+     */
+    private fun createCircularLogoBitmap(context: Context): Bitmap? {
+        return try {
+            val raw = BitmapFactory.decodeResource(context.resources, R.drawable.aura_logo)
+                ?: BitmapFactory.decodeResource(context.resources, R.drawable.aura_bunny_mascot)
+                ?: return null
+            val size = 192
+            val scaled = Bitmap.createScaledBitmap(raw, size, size, true)
+            val output = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(output)
+            val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+            val path = Path().apply {
+                addCircle(size / 2f, size / 2f, size / 2f, Path.Direction.CW)
+            }
+            canvas.clipPath(path)
+            canvas.drawBitmap(scaled, 0f, 0f, paint)
+            output
+        } catch (_: Exception) {
+            null
         }
     }
 }

@@ -77,6 +77,7 @@ import com.auramusic.app.core.media.AuraPlayerManager
 import com.auramusic.app.domain.model.ArtistCarouselItem
 import com.auramusic.app.domain.model.AuraPlaylist
 import com.auramusic.app.domain.model.AuraTrack
+import com.auramusic.app.domain.model.YtmCommunityPlaylist
 import com.auramusic.app.domain.model.YtmTopArtist
 import com.auramusic.app.ui.components.AuraAddToPlaylistModal
 import com.auramusic.app.ui.components.AuraCreatePlaylistModal
@@ -141,6 +142,7 @@ fun SearchScreen(
     matchedArtist: YtmTopArtist? = null,
     matchedArtists: List<YtmTopArtist> = emptyList(),
     artistFeaturingItems: List<ArtistCarouselItem> = emptyList(),
+    playlistResults: List<YtmCommunityPlaylist> = emptyList(),
     currentPlayingId: String? = null,
     onQueryChange: (String) -> Unit,
     onFilterChange: (String) -> Unit,
@@ -152,7 +154,8 @@ fun SearchScreen(
     onAddTrackToPlaylist: (playlistId: String, track: AuraTrack) -> Unit = { _, _ -> },
     onCreatePlaylist: (name: String, description: String, coverUrl: String) -> Unit = { _, _, _ -> },
     onRemoveRecentlyPlayed: (AuraTrack) -> Unit = {},
-    onOpenArtist: (String, String) -> Unit = { _, _ -> }
+    onOpenArtist: (String, String) -> Unit = { _, _ -> },
+    onOpenCommunityPlaylist: (YtmCommunityPlaylist) -> Unit = {}
 ) {
     val context = LocalContext.current
     var isSearchActive by rememberSaveable { mutableStateOf(query.isNotBlank()) }
@@ -215,6 +218,7 @@ fun SearchScreen(
                 matchedArtist = matchedArtist,
                 matchedArtists = matchedArtists,
                 artistFeaturingItems = artistFeaturingItems,
+                playlistResults = playlistResults,
                 currentPlayingId = currentPlayingId,
                 focusRequester = focusRequester,
                 onBackClick = {
@@ -228,7 +232,8 @@ fun SearchScreen(
                 onToggleFavorite = onToggleFavorite,
                 onRemoveRecentlyPlayed = onRemoveRecentlyPlayed,
                 onOptionsClick = { selectedModalTrack = it },
-                onOpenArtist = onOpenArtist
+                onOpenArtist = onOpenArtist,
+                onOpenCommunityPlaylist = onOpenCommunityPlaylist
             )
         }
 
@@ -627,6 +632,7 @@ private fun DedicatedSearchingView(
     matchedArtist: YtmTopArtist?,
     matchedArtists: List<YtmTopArtist> = emptyList(),
     artistFeaturingItems: List<ArtistCarouselItem>,
+    playlistResults: List<YtmCommunityPlaylist> = emptyList(),
     currentPlayingId: String?,
     focusRequester: FocusRequester,
     onBackClick: () -> Unit,
@@ -637,7 +643,8 @@ private fun DedicatedSearchingView(
     onToggleFavorite: (AuraTrack) -> Unit,
     onRemoveRecentlyPlayed: (AuraTrack) -> Unit,
     onOptionsClick: (AuraTrack) -> Unit,
-    onOpenArtist: (String, String) -> Unit
+    onOpenArtist: (String, String) -> Unit,
+    onOpenCommunityPlaylist: (YtmCommunityPlaylist) -> Unit = {}
 ) {
     val listState = rememberLazyListState()
     val focusManager = LocalFocusManager.current
@@ -866,7 +873,24 @@ private fun DedicatedSearchingView(
                 // -------------------------------------------------------------
                 // ACTIVE QUERY: ARTIST MATCH + FEATURING CAROUSEL + SONG TILES
                 // -------------------------------------------------------------
-                if (isSearching && results.isEmpty()) {
+                if (filter == "playlists") {
+                    if (isSearching && playlistResults.isEmpty()) {
+                        items(6) {
+                            TrackItemSkeleton()
+                        }
+                    } else {
+                        items(playlistResults.distinctBy { it.id }, key = { "pl_res_${it.id}" }) { playlist ->
+                            SearchResultPlaylistTile(
+                                playlist = playlist,
+                                onClick = {
+                                    focusManager.clearFocus()
+                                    keyboardController?.hide()
+                                    onOpenCommunityPlaylist(playlist)
+                                }
+                            )
+                        }
+                    }
+                } else if (isSearching && results.isEmpty()) {
                     items(6) {
                         TrackItemSkeleton()
                     }
@@ -882,7 +906,7 @@ private fun DedicatedSearchingView(
                     }
 
                     // 2. Featuring Carousel (Image 2 style)
-                    if (matchedArtist != null && artistFeaturingItems.isNotEmpty() && (filter == "all" || filter == "artists" || filter == "albums" || filter == "playlists")) {
+                    if (matchedArtist != null && artistFeaturingItems.isNotEmpty() && (filter == "all" || filter == "artists" || filter == "albums")) {
                         item(key = "feat_carousel_${matchedArtist.id}") {
                             Column(
                                 modifier = Modifier
@@ -1154,6 +1178,64 @@ private fun FeaturingAlbumCard(
                 text = item.subtitle,
                 fontSize = 11.5.sp,
                 color = Color(0xFFA0A5B5),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
+/**
+ * Playlist Search Result Tile rendered when the "Playlists" filter pill is active.
+ */
+@Composable
+private fun SearchResultPlaylistTile(
+    playlist: YtmCommunityPlaylist,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 20.dp, vertical = 9.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        AsyncImage(
+            model = playlist.highResArtworkUrl,
+            contentDescription = playlist.title,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier
+                .size(54.dp)
+                .clip(RoundedCornerShape(8.dp))
+        )
+
+        Spacer(modifier = Modifier.width(14.dp))
+
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = playlist.title,
+                fontSize = 14.5.sp,
+                fontWeight = FontWeight.Bold,
+                color = TextPrimary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Spacer(modifier = Modifier.height(3.dp))
+            val subtitleText = buildString {
+                append("Playlist")
+                if (playlist.author.isNotBlank()) {
+                    append(" • ")
+                    append(playlist.author)
+                }
+                if (playlist.trackCount.isNotBlank() && !playlist.trackCount.equals("Playlist", ignoreCase = true)) {
+                    append(" • ")
+                    append(playlist.trackCount)
+                }
+            }
+            Text(
+                text = subtitleText,
+                fontSize = 12.5.sp,
+                color = TextSecondary,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )

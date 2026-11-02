@@ -90,8 +90,8 @@ fun PlaylistDetailScreen(
     var selectedModalTrack by remember { mutableStateOf<AuraTrack?>(null) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
-    val allTracks = remember(playlistDetail.tracks) {
-        playlistDetail.tracks.map { it.track }
+    val allTracks = remember(playlistDetail.tracks, playlistDetail.title) {
+        playlistDetail.tracks.map { it.track.copy(album = playlistDetail.title) }
     }
     var visibleTrackCount by remember(playlistDetail.tracks) { mutableIntStateOf(20) }
 
@@ -298,7 +298,7 @@ fun PlaylistDetailScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable { onPlayTrack(item.track, allTracks) }
+                        .clickable { onPlayTrack(item.track.copy(album = playlistDetail.title), allTracks) }
                         .padding(horizontal = 20.dp, vertical = 9.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {

@@ -1324,8 +1324,13 @@ private fun LiquidGlassPlayerView(
                         .weight(1f)
                         .padding(horizontal = 8.dp)
                 ) {
-                    val playingFrom = if (track.album.isNotBlank() && track.album != track.title) {
-                        "Playing from ${track.album}"
+                    val cleanAlbum = track.album.trim()
+                    val isValidSource = cleanAlbum.isNotBlank() &&
+                        cleanAlbum != track.title &&
+                        !cleanAlbum.matches(Regex("^\\d+:\\d{2}(:\\d{2})?$")) &&
+                        !cleanAlbum.endsWith("views", ignoreCase = true)
+                    val playingFrom = if (isValidSource) {
+                        "Playing from $cleanAlbum"
                     } else {
                         "Playing from Playlist"
                     }
@@ -1794,8 +1799,13 @@ private fun SpotifyEncorePlayerView(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     modifier = Modifier.weight(1f).padding(horizontal = 8.dp)
                 ) {
-                    val playingFrom = if (track.album.isNotBlank() && track.album != track.title) {
-                        "PLAYING FROM ${track.album.uppercase()}"
+                    val cleanAlbum = track.album.trim()
+                    val isValidSource = cleanAlbum.isNotBlank() &&
+                        cleanAlbum != track.title &&
+                        !cleanAlbum.matches(Regex("^\\d+:\\d{2}(:\\d{2})?$")) &&
+                        !cleanAlbum.endsWith("views", ignoreCase = true)
+                    val playingFrom = if (isValidSource) {
+                        "PLAYING FROM ${cleanAlbum.uppercase()}"
                     } else {
                         "PLAYING FROM PLAYLIST"
                     }

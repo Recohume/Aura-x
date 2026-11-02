@@ -164,6 +164,7 @@ fun AuraMainScreen(viewModel: AuraViewModel) {
     val searchMatchedArtist by viewModel.searchMatchedArtist.collectAsState()
     val searchMatchedArtists by viewModel.searchMatchedArtists.collectAsState()
     val artistFeaturingItems by viewModel.artistFeaturingItems.collectAsState()
+    val searchPlaylistResults by viewModel.searchPlaylistResults.collectAsState()
     val spotifyImportStatus by viewModel.spotifyImportStatus.collectAsState()
     val importedPlaylistSuccess by viewModel.importedPlaylistSuccess.collectAsState()
     val selectedUserPlaylist by viewModel.selectedUserPlaylist.collectAsState()
@@ -292,6 +293,7 @@ fun AuraMainScreen(viewModel: AuraViewModel) {
                     matchedArtist = searchMatchedArtist,
                     matchedArtists = searchMatchedArtists,
                     artistFeaturingItems = artistFeaturingItems,
+                    playlistResults = searchPlaylistResults,
                     currentPlayingId = currentTrack?.videoId,
                     onQueryChange = { viewModel.updateSearchQuery(it) },
                     onFilterChange = { viewModel.setSearchFilter(it) },
@@ -303,7 +305,8 @@ fun AuraMainScreen(viewModel: AuraViewModel) {
                     onAddTrackToPlaylist = { plId, track -> viewModel.addTrackToPlaylist(plId, track) },
                     onCreatePlaylist = { name, desc, cover -> viewModel.createPlaylist(name, desc, cover) },
                     onRemoveRecentlyPlayed = { viewModel.removeFromRecentlyPlayed(it) },
-                    onOpenArtist = { artistName, songTitle -> viewModel.openArtistByName(artistName, songTitle) }
+                    onOpenArtist = { artistName, songTitle -> viewModel.openArtistByName(artistName, songTitle) },
+                    onOpenCommunityPlaylist = { viewModel.openPlaylistDetail(it) }
                 )
                 2 -> LibraryScreen(
                     favorites = favorites,

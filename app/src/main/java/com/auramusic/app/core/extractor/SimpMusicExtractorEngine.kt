@@ -1002,7 +1002,7 @@ object SimpMusicExtractorEngine {
                     })
                 })
                 put("query", query)
-                put("params", "EgeKAQQoAEABahIQBBAKEAUQDhADEAkQFRAQEBE%3D") // Community Playlists filter
+                put("params", "EgeKAQQoAEABahIQBBAKEAUQDhADEAkQFRAQEBE=") // Valid Base64 Community Playlists filter
             }
 
             val req = Request.Builder()
@@ -1052,11 +1052,14 @@ object SimpMusicExtractorEngine {
                                     val t = flexCol1Runs.optJSONObject(r)?.optString("text")?.trim() ?: ""
                                     if (t.isNotEmpty() && t != "•") textList.add(t)
                                 }
-                                if (textList.size >= 2) {
-                                    author = textList[1]
-                                    count = textList.getOrNull(2) ?: "50 tracks"
-                                } else if (textList.isNotEmpty()) {
-                                    author = textList[0]
+                                if (textList.isNotEmpty()) {
+                                    if (textList[0].equals("Playlist", ignoreCase = true)) {
+                                        author = textList.getOrNull(1) ?: "Community Playlist"
+                                        count = textList.getOrNull(2) ?: "Playlist"
+                                    } else {
+                                        author = textList[0]
+                                        count = textList.getOrNull(1) ?: "Playlist"
+                                    }
                                 }
                             }
 
@@ -2314,7 +2317,7 @@ object SimpMusicExtractorEngine {
                     val match = searchYouTubeMusic("$title $artist", "songs").firstOrNull()
                     completed++
                     onProgress(completed, rawSeeds.size)
-                    match
+                    match?.copy(album = playlistName)
                 }
             }.awaitAll().filterNotNull()
             resolvedTracks.addAll(results)
@@ -2407,8 +2410,16 @@ object SimpMusicExtractorEngine {
                         texts.firstOrNull { it.matches(Regex("^\\d+:\\d{2}(:\\d{2})?$")) }?.let {
                             durationSec = parseDurationText(it)
                         }
-                        if (texts.size >= 3) {
-                            album = texts[2]
+                        val albumCandidate = texts.drop(1).firstOrNull { candidate ->
+                            !candidate.equals(artist, ignoreCase = true) &&
+                                !candidate.equals("Song", ignoreCase = true) &&
+                                !candidate.equals("Video", ignoreCase = true) &&
+                                !candidate.matches(Regex("^\\d+:\\d{2}(:\\d{2})?$")) &&
+                                !candidate.endsWith("views", ignoreCase = true) &&
+                                !candidate.endsWith("plays", ignoreCase = true)
+                        }
+                        if (albumCandidate != null) {
+                            album = albumCandidate
                         }
                     }
 

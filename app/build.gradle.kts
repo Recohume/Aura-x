@@ -18,9 +18,9 @@ android {
         // Dynamic version code & name: CI build run number or Gradle parameter with local defaults
         val ciVersionCode = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull()
         val propVersionCode = (project.findProperty("versionCode") as? String)?.toIntOrNull()
-        versionCode = propVersionCode ?: ciVersionCode ?: 16
+        versionCode = propVersionCode ?: ciVersionCode ?: 17
 
-        versionName = "1.4.4"
+        versionName = "1.4.5"
         val propVersionName = project.findProperty("versionName") as? String
         val envVersionName = System.getenv("APP_VERSION_NAME")
         if (propVersionName != null) {

@@ -31,7 +31,7 @@ async function main() {
     process.exit(0);
   }
 
-  const rawVersion = (process.env.RAW_VERSION || "1.4.4").trim().replace(/^v/i, "");
+  const rawVersion = (process.env.RAW_VERSION || "1.4.5").trim().replace(/^v/i, "");
   const versionTag = (process.env.VERSION || `v${rawVersion}`).trim();
 
   console.log(`Generating Google OAuth2 token for service account: ${clientEmail}`);
@@ -73,28 +73,20 @@ async function main() {
 
   console.log(`Successfully acquired Google OAuth token. Broadcasting release ${versionTag} to topic 'releases'...`);
 
+  // Send high-priority data-only payload so AuraFirebaseMessagingService is always invoked
+  // (even in background/doze) to render the custom monochrome smallIcon, right-side circular
+  // mascot largeIcon, and direct PendingIntent to MainActivity's App Update Modal.
   const fcmPayload = {
     message: {
       topic: "releases",
-      notification: {
-        title: `Aura ${versionTag} is available!`,
-        body: "A new version of Aura is ready. Tap to download and install!"
-      },
       data: {
         type: "release",
         version: rawVersion,
-        title: `Aura ${versionTag}`,
-        body: "A new version of Aura is available!"
+        title: `Aura ${versionTag} is available!`,
+        body: "A new version of Aura is ready. Tap to download and install!"
       },
       android: {
-        priority: "high",
-        notification: {
-          channel_id: "aura_music_updates",
-          click_action: "com.auramusic.app.OPEN_UPDATE",
-          default_sound: true,
-          notification_priority: "PRIORITY_HIGH",
-          icon: "ic_aura_notification"
-        }
+        priority: "high"
       }
     }
   };

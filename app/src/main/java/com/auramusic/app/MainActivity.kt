@@ -78,9 +78,10 @@ class MainActivity : ComponentActivity() {
         } catch (_: Exception) {
         }
 
+        val openedFromUpdate = isUpdateNotificationIntent(intent)
         setContent {
             AuraMusicTheme {
-                var isSplashActive by rememberSaveable { mutableStateOf(true) }
+                var isSplashActive by rememberSaveable { mutableStateOf(!openedFromUpdate) }
 
                 Box(modifier = Modifier.fillMaxSize()) {
                     AuraMainScreen(viewModel = auraViewModel)
@@ -105,10 +106,19 @@ class MainActivity : ComponentActivity() {
         handleUpdateIntent(intent)
     }
 
+    private fun isUpdateNotificationIntent(intent: Intent?): Boolean {
+        if (intent == null) return false
+        return intent.getBooleanExtra(AuraNotificationManager.EXTRA_OPEN_UPDATE, false) ||
+            intent.action == "com.auramusic.app.OPEN_UPDATE" ||
+            intent.getStringExtra("type") == "release" ||
+            intent.getStringExtra("type") == "app-update" ||
+            intent.hasExtra("update_version")
+    }
+
     private fun handleUpdateIntent(intent: Intent?) {
         if (intent?.getBooleanExtra("test_update", false) == true) {
             auraViewModel.triggerTestUpdateModal()
-        } else if (intent?.getBooleanExtra(AuraNotificationManager.EXTRA_OPEN_UPDATE, false) == true) {
+        } else if (isUpdateNotificationIntent(intent)) {
             auraViewModel.checkForUpdates(force = true)
         }
     }

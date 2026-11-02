@@ -295,7 +295,8 @@ fun PlaylistDetailsScreen(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(14.dp))
                                 .clickable {
-                                    val shuffled = playlist.tracks.shuffled()
+                                    val contextualTracks = playlist.tracks.map { it.copy(album = playlist.name) }
+                                    val shuffled = contextualTracks.shuffled()
                                     shuffled.firstOrNull()?.let { first ->
                                         onPlayTrack(first, shuffled)
                                     }
@@ -328,8 +329,9 @@ fun PlaylistDetailsScreen(
                                 .clip(CircleShape)
                                 .background(AuraPlayGreen)
                                 .clickable {
-                                    playlist.tracks.firstOrNull()?.let { first ->
-                                        onPlayTrack(first, playlist.tracks)
+                                    val contextualTracks = playlist.tracks.map { it.copy(album = playlist.name) }
+                                    contextualTracks.firstOrNull()?.let { first ->
+                                        onPlayTrack(first, contextualTracks)
                                     }
                                 },
                             contentAlignment = Alignment.Center
@@ -365,7 +367,10 @@ fun PlaylistDetailsScreen(
                     isDownloaded = downloads.any { it.videoId == track.videoId && it.isDownloaded },
                     isDownloading = downloadingIds.contains(track.videoId),
                     downloadProgress = downloadProgressMap[track.videoId],
-                    onClick = { onPlayTrack(track, playlist.tracks) },
+                    onClick = {
+                        val contextualTracks = playlist.tracks.map { it.copy(album = playlist.name) }
+                        onPlayTrack(track.copy(album = playlist.name), contextualTracks)
+                    },
                     onToggleFavorite = { onToggleFavorite(track) },
                     onDownload = { onDownloadTrack(track) },
                     onOptionsClick = { selectedModalTrack = track }
@@ -499,7 +504,8 @@ fun PlaylistDetailsScreen(
             },
             onWatchVideo = {
                 selectedModalTrack = null
-                onPlayTrack(modalTrack, playlist.tracks)
+                val contextualTracks = playlist.tracks.map { it.copy(album = playlist.name) }
+                onPlayTrack(modalTrack.copy(album = playlist.name), contextualTracks)
                 com.auramusic.app.core.media.AuraPlayerManager.setVideoMode(true)
             }
         )
