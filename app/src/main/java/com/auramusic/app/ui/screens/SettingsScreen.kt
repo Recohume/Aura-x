@@ -98,7 +98,7 @@ fun SettingsScreen(viewModel: AuraViewModel) {
         }
     }
 
-    val appVersionName = packageInfo?.versionName ?: "1.2"
+    val appVersionName = packageInfo?.versionName ?: "1.4"
     val appVersionCode = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
         packageInfo?.longVersionCode ?: 1L
     } else {
@@ -327,7 +327,7 @@ fun SettingsScreen(viewModel: AuraViewModel) {
             Spacer(modifier = Modifier.height(30.dp))
         }
 
-        // 6. About AURA Music (Clean minimal lockup with official Aura Logo & dynamic version)
+        // 6. About Aura (Clean minimal lockup with official Aura Logo & dynamic version)
         item {
             Row(
                 modifier = Modifier
@@ -337,7 +337,7 @@ fun SettingsScreen(viewModel: AuraViewModel) {
             ) {
                 Image(
                     painter = painterResource(id = R.drawable.aura_logo),
-                    contentDescription = "AURA Music Logo",
+                    contentDescription = "Aura Logo",
                     modifier = Modifier
                         .size(42.dp)
                         .clip(CircleShape)
@@ -345,7 +345,7 @@ fun SettingsScreen(viewModel: AuraViewModel) {
                 Spacer(modifier = Modifier.width(14.dp))
                 Column {
                     Text(
-                        text = "AURA Music v$appVersionName",
+                        text = "Aura v$appVersionName",
                         color = Color.White,
                         fontWeight = FontWeight.Bold,
                         fontSize = 15.sp

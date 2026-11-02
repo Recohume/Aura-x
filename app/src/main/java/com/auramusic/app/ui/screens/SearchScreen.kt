@@ -8,9 +8,11 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -73,8 +75,11 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.auramusic.app.core.media.AuraPlayerManager
 import com.auramusic.app.domain.model.ArtistCarouselItem
+import com.auramusic.app.domain.model.AuraPlaylist
 import com.auramusic.app.domain.model.AuraTrack
 import com.auramusic.app.domain.model.YtmTopArtist
+import com.auramusic.app.ui.components.AuraAddToPlaylistModal
+import com.auramusic.app.ui.components.AuraCreatePlaylistModal
 import com.auramusic.app.ui.components.AuraTrackOptionsModal
 import com.auramusic.app.ui.components.TrackItemSkeleton
 import com.auramusic.app.ui.theme.AuraNeonLime
@@ -143,12 +148,17 @@ fun SearchScreen(
     onPlaySearchTrack: (AuraTrack, List<AuraTrack>) -> Unit = onPlayTrack,
     onToggleFavorite: (AuraTrack) -> Unit,
     onDownloadTrack: (AuraTrack) -> Unit,
+    playlists: List<AuraPlaylist> = emptyList(),
+    onAddTrackToPlaylist: (playlistId: String, track: AuraTrack) -> Unit = { _, _ -> },
+    onCreatePlaylist: (name: String, description: String, coverUrl: String) -> Unit = { _, _, _ -> },
     onRemoveRecentlyPlayed: (AuraTrack) -> Unit = {},
     onOpenArtist: (String, String) -> Unit = { _, _ -> }
 ) {
     val context = LocalContext.current
     var isSearchActive by rememberSaveable { mutableStateOf(query.isNotBlank()) }
     var selectedModalTrack by remember { mutableStateOf<AuraTrack?>(null) }
+    var trackForAddToPlaylist by remember { mutableStateOf<AuraTrack?>(null) }
+    var showCreatePlaylistModal by remember { mutableStateOf(false) }
     val focusRequester = remember { FocusRequester() }
 
     val showActiveSearch = isSearchActive || query.isNotBlank()
@@ -246,12 +256,54 @@ fun SearchScreen(
                     selectedModalTrack = null
                 },
                 onAddToPlaylist = {
-                    Toast.makeText(context, "Saved to library", Toast.LENGTH_SHORT).show()
+                    val t = modalTrack
                     selectedModalTrack = null
+                    trackForAddToPlaylist = t
                 },
                 onGoToArtist = {
                     selectedModalTrack = null
                     onOpenArtist(modalTrack.artist, modalTrack.title)
+                },
+                isDownloaded = downloads.any { it.videoId == modalTrack.videoId },
+                onDownloadTrack = {
+                    onDownloadTrack(modalTrack)
+                    Toast.makeText(context, "Downloading ${modalTrack.title}…", Toast.LENGTH_SHORT).show()
+                    selectedModalTrack = null
+                },
+                onWatchVideo = {
+                    selectedModalTrack = null
+                    onPlayTrack(modalTrack, listOf(modalTrack))
+                    com.auramusic.app.core.media.AuraPlayerManager.setVideoMode(true)
+                }
+            )
+        }
+
+        // Modal: Add Song to Playlist
+        trackForAddToPlaylist?.let { trackToAdd ->
+            AuraAddToPlaylistModal(
+                track = trackToAdd,
+                playlists = playlists,
+                onDismiss = { trackForAddToPlaylist = null },
+                onSelectPlaylist = { targetPl ->
+                    onAddTrackToPlaylist(targetPl.id, trackToAdd)
+                    trackForAddToPlaylist = null
+                    Toast.makeText(context, "Added '${trackToAdd.title}' to '${targetPl.name}'", Toast.LENGTH_SHORT).show()
+                },
+                onCreateNewPlaylist = {
+                    trackForAddToPlaylist = null
+                    showCreatePlaylistModal = true
+                }
+            )
+        }
+
+        // Modal: Create Playlist on the fly
+        if (showCreatePlaylistModal) {
+            AuraCreatePlaylistModal(
+                onDismiss = { showCreatePlaylistModal = false },
+                onCreate = { title, desc, coverUri ->
+                    showCreatePlaylistModal = false
+                    onCreatePlaylist(title, desc, coverUri)
+                    Toast.makeText(context, "Created playlist: $title", Toast.LENGTH_SHORT).show()
                 }
             )
         }
@@ -775,7 +827,7 @@ private fun DedicatedSearchingView(
                 // -------------------------------------------------------------
                 item {
                     Text(
-                        text = "Recent searches",
+                        text = "Recent",
                         fontSize = 18.sp,
                         fontWeight = FontWeight.Bold,
                         color = Color.White,
@@ -933,7 +985,7 @@ private fun RecentPlayedTrackRow(
         verticalAlignment = Alignment.CenterVertically
     ) {
         AsyncImage(
-            model = track.highResArtworkUrl,
+            model = track.highResArtworkUrl.ifBlank { "https://i.ytimg.com/vi/${track.videoId}/hqdefault.jpg" },
             contentDescription = track.title,
             contentScale = ContentScale.Crop,
             modifier = Modifier
@@ -1131,6 +1183,7 @@ private fun FeaturingAlbumCard(
  * Song Search Result Tile matching Image 2:
  * Square Artwork + Title & Artist + 3-Dot Options Icon + Heart Favorite Icon.
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun SearchResultSongTile(
     track: AuraTrack,
@@ -1144,12 +1197,15 @@ private fun SearchResultSongTile(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = onOptionsClick
+            )
             .padding(horizontal = 20.dp, vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         AsyncImage(
-            model = track.highResArtworkUrl,
+            model = track.highResArtworkUrl.ifBlank { "https://i.ytimg.com/vi/${track.videoId}/hqdefault.jpg" },
             contentDescription = track.title,
             contentScale = ContentScale.Crop,
             modifier = Modifier

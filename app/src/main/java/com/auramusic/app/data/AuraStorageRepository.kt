@@ -2,8 +2,13 @@ package com.auramusic.app.data
 
 import android.content.Context
 import android.content.SharedPreferences
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
+import com.auramusic.app.domain.model.AuraPalette
 import com.auramusic.app.domain.model.AuraPlaylist
 import com.auramusic.app.domain.model.AuraTrack
+import com.auramusic.app.domain.model.LyricLine
+import com.auramusic.app.domain.model.LyricsData
 import com.auramusic.app.domain.model.ListeningStats
 import com.auramusic.app.domain.model.NowPlayingStyle
 import org.json.JSONArray
@@ -75,6 +80,92 @@ class AuraStorageRepository(context: Context) {
 
     fun setLyricsOffsetMs(videoId: String, offsetMs: Int) {
         prefs.edit().putInt("lyric_offset_$videoId", offsetMs.coerceIn(-5000, 5000)).apply()
+    }
+
+    fun saveOfflineLyrics(videoId: String, lyrics: LyricsData) {
+        try {
+            val json = JSONObject().apply {
+                put("videoId", lyrics.videoId)
+                put("plainLyrics", lyrics.plainLyrics)
+                put("source", lyrics.source)
+                put("hasRomanization", lyrics.hasRomanization)
+                val linesArr = JSONArray()
+                lyrics.syncedLines.forEach { line ->
+                    linesArr.put(JSONObject().apply {
+                        put("timeSec", line.timeSec.toDouble())
+                        put("endTimeSec", line.endTimeSec.toDouble())
+                        put("text", line.text)
+                        if (line.romanizedText != null) {
+                            put("romanizedText", line.romanizedText)
+                        }
+                    })
+                }
+                put("syncedLines", linesArr)
+            }
+            prefs.edit().putString("offline_lyrics_$videoId", json.toString()).apply()
+        } catch (e: Exception) {
+            // Non-critical
+        }
+    }
+
+    fun loadOfflineLyrics(videoId: String): LyricsData? {
+        val raw = prefs.getString("offline_lyrics_$videoId", null) ?: return null
+        return try {
+            val obj = JSONObject(raw)
+            val linesArr = obj.optJSONArray("syncedLines") ?: JSONArray()
+            val lines = mutableListOf<LyricLine>()
+            for (i in 0 until linesArr.length()) {
+                val lObj = linesArr.optJSONObject(i) ?: continue
+                lines.add(
+                    LyricLine(
+                        timeSec = lObj.optDouble("timeSec", 0.0).toFloat(),
+                        endTimeSec = lObj.optDouble("endTimeSec", 0.0).toFloat(),
+                        text = lObj.optString("text", ""),
+                        romanizedText = if (lObj.has("romanizedText")) lObj.getString("romanizedText") else null
+                    )
+                )
+            }
+            LyricsData(
+                videoId = obj.optString("videoId", videoId),
+                plainLyrics = obj.optString("plainLyrics", ""),
+                syncedLines = lines,
+                source = obj.optString("source", "SimpMusic Offline"),
+                hasRomanization = obj.optBoolean("hasRomanization", false)
+            )
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    fun saveOfflinePalette(videoId: String, palette: AuraPalette) {
+        try {
+            val json = JSONObject().apply {
+                put("primary", palette.primary.toArgb())
+                put("secondary", palette.secondary.toArgb())
+                put("backgroundTop", palette.backgroundTop.toArgb())
+                put("backgroundBottom", palette.backgroundBottom.toArgb())
+                put("surfaceGlass", palette.surfaceGlass.toArgb())
+            }
+            prefs.edit().putString("offline_palette_$videoId", json.toString()).apply()
+        } catch (e: Exception) {
+            // Non-critical
+        }
+    }
+
+    fun loadOfflinePalette(videoId: String): AuraPalette? {
+        val raw = prefs.getString("offline_palette_$videoId", null) ?: return null
+        return try {
+            val obj = JSONObject(raw)
+            AuraPalette(
+                primary = Color(obj.getInt("primary")),
+                secondary = Color(obj.getInt("secondary")),
+                backgroundTop = Color(obj.getInt("backgroundTop")),
+                backgroundBottom = Color(obj.getInt("backgroundBottom")),
+                surfaceGlass = Color(obj.getInt("surfaceGlass"))
+            )
+        } catch (e: Exception) {
+            null
+        }
     }
 
     fun loadNowPlayingStyle(): NowPlayingStyle {

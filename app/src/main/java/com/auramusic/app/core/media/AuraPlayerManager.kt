@@ -5,6 +5,7 @@ import android.content.Intent
 import android.media.audiofx.Equalizer
 import android.net.Uri
 import android.os.Build
+import android.os.Environment
 import android.util.Log
 import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
@@ -26,6 +27,8 @@ import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.exoplayer.source.MergingMediaSource
+import androidx.media3.exoplayer.source.ProgressiveMediaSource
 import com.auramusic.app.core.extractor.SimpMusicExtractorEngine
 import com.auramusic.app.domain.model.AuraTrack
 import com.auramusic.app.domain.model.EqualizerPreset
@@ -95,10 +98,13 @@ object AuraPlayerManager {
     private val _lastSkippedSegment = MutableStateFlow<String?>(null)
     val lastSkippedSegment: StateFlow<String?> = _lastSkippedSegment.asStateFlow()
 
-    private val _activeEqPreset = MutableStateFlow(SIMPMUSIC_EQ_PRESETS.first())
+    private val _activeEqPreset = MutableStateFlow(
+        SIMPMUSIC_EQ_PRESETS.find { it.id == "studio" } ?: SIMPMUSIC_EQ_PRESETS.first()
+    )
     val activeEqPreset: StateFlow<EqualizerPreset> = _activeEqPreset.asStateFlow()
 
-    private val _eqEnabled = MutableStateFlow(true)
+    // Default EQ to false for bit-perfect, uncolored, distortion-free audio
+    private val _eqEnabled = MutableStateFlow(false)
     val eqEnabled: StateFlow<Boolean> = _eqEnabled.asStateFlow()
 
     private val _loudnessNormalization = MutableStateFlow(true)
@@ -109,6 +115,23 @@ object AuraPlayerManager {
 
     private val _crossfadeSeconds = MutableStateFlow(4)
     val crossfadeSeconds: StateFlow<Int> = _crossfadeSeconds.asStateFlow()
+
+    // Spotify-style Video Player Mode State
+    private val _isVideoMode = MutableStateFlow(false)
+    val isVideoMode: StateFlow<Boolean> = _isVideoMode.asStateFlow()
+
+    private val _isVideoLoading = MutableStateFlow(false)
+    val isVideoLoading: StateFlow<Boolean> = _isVideoLoading.asStateFlow()
+
+    // Preserved Audio Mode state so switching between video & audio mode never loses original Spotify artwork or queue
+    var originalAudioTrack: AuraTrack? = null
+        private set
+    var originalAudioQueue: List<AuraTrack>? = null
+        private set
+    var originalAudioIndex: Int = -1
+        private set
+
+    private var cacheDataSourceFactory: CacheDataSource.Factory? = null
 
     private val _sleepTimerRemainingMin = MutableStateFlow<Int?>(null)
     val sleepTimerRemainingMin: StateFlow<Int?> = _sleepTimerRemainingMin.asStateFlow()
@@ -146,6 +169,7 @@ object AuraPlayerManager {
             .setCache(cache)
             .setUpstreamDataSourceFactory(upstreamFactory)
             .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
+        this.cacheDataSourceFactory = cacheDataSourceFactory
 
         // 3. SimpMusic ResolvingDataSource: intercepts aura://track/{videoId} on ExoPlayer's loader thread
         val resolvingFactory = ResolvingDataSource.Factory(cacheDataSourceFactory) { dataSpec: DataSpec ->
@@ -177,6 +201,38 @@ object AuraPlayerManager {
                     .setUri(Uri.parse(resolved.streamUrl))
                     .setKey(videoId)
                     .build()
+            }
+
+            if (uri.scheme == "aura" && uri.host == "video") {
+                val videoId = uri.lastPathSegment ?: throw PlaybackException(
+                    "Missing videoId",
+                    null,
+                    PlaybackException.ERROR_CODE_IO_UNSPECIFIED
+                )
+
+                _isVideoLoading.value = true
+                val resolvedVideo = runBlocking(Dispatchers.IO) {
+                    SimpMusicExtractorEngine.resolveVideoStream(videoId)
+                }
+                _isVideoLoading.value = false
+
+                if (resolvedVideo != null) {
+                    _streamSourceTier.value = "Video HD • ${resolvedVideo.quality}"
+                    return@Factory dataSpec.buildUpon()
+                        .setUri(Uri.parse(resolvedVideo.streamUrl))
+                        .setKey("video_$videoId")
+                        .build()
+                } else {
+                    // Fallback to high quality audio stream if video resolution is unavailable
+                    val resolved = runBlocking(Dispatchers.IO) {
+                        SimpMusicExtractorEngine.resolveStream(videoId)
+                    }
+                    _streamSourceTier.value = if (resolved.bitrateKbps >= 140) "Ultra HD • ${resolved.bitrateKbps} KBPS" else "High Quality Audio"
+                    return@Factory dataSpec.buildUpon()
+                        .setUri(Uri.parse(resolved.streamUrl))
+                        .setKey(videoId)
+                        .build()
+                }
             }
             dataSpec
         }
@@ -257,13 +313,24 @@ object AuraPlayerManager {
         startProgressTicker()
     }
 
+    var activeQueueTag: String? = null
+        private set
+
     fun playTrack(
         track: AuraTrack,
         newQueue: List<AuraTrack>? = null,
-        allowRadioQueue: Boolean = _isShuffleEnabled.value && newQueue == null
+        allowRadioQueue: Boolean = _isShuffleEnabled.value && newQueue == null,
+        queueTag: String? = null
     ) {
         val player = exoPlayer ?: return
         radioFetchJob?.cancel()
+        activeQueueTag = queueTag
+
+        // Clean slate for new audio playback
+        originalAudioTrack = null
+        originalAudioQueue = null
+        originalAudioIndex = -1
+        _isVideoMode.value = false
 
         val dedupedNewQueue = newQueue?.distinctBy { it.videoId }
         if (!dedupedNewQueue.isNullOrEmpty()) {
@@ -339,6 +406,38 @@ object AuraPlayerManager {
             _queue.value = _queue.value + track
             originalQueue = originalQueue + track
             exoPlayer?.addMediaItem(buildMediaItem(track))
+        }
+    }
+
+    fun syncFavoriteTrack(track: AuraTrack, isLiked: Boolean) {
+        val currentList = _queue.value.toMutableList()
+        val curTrack = _currentTrack.value
+        val curIdx = curTrack?.let { cur -> currentList.indexOfFirst { it.videoId == cur.videoId } } ?: -1
+
+        if (activeQueueTag == "favorites" || currentList.any { it.videoId == track.videoId } || isLiked) {
+            if (isLiked) {
+                if (currentList.none { it.videoId == track.videoId }) {
+                    val insertIdx = if (curIdx >= 0 && curIdx < currentList.size) curIdx + 1 else currentList.size
+                    currentList.add(insertIdx, track)
+                    _queue.value = currentList
+                    originalQueue = originalQueue + track
+                    val player = exoPlayer
+                    if (player != null && player.playbackState != Player.STATE_IDLE) {
+                        syncUpcomingItemsInPlayer(currentList.drop(curIdx + 1))
+                    }
+                }
+            } else {
+                val removeIdx = currentList.indexOfFirst { it.videoId == track.videoId }
+                if (removeIdx > curIdx) {
+                    currentList.removeAt(removeIdx)
+                    _queue.value = currentList
+                    originalQueue = originalQueue.filterNot { it.videoId == track.videoId }
+                    val player = exoPlayer
+                    if (player != null && player.playbackState != Player.STATE_IDLE) {
+                        syncUpcomingItemsInPlayer(currentList.drop(curIdx + 1))
+                    }
+                }
+            }
         }
     }
 
@@ -616,13 +715,39 @@ object AuraPlayerManager {
         }
     }
 
-    fun getOfflineFile(context: Context, videoId: String): File {
-        val dir = File(context.filesDir, "aura_offline_tracks")
-        if (!dir.exists()) dir.mkdirs()
-        return File(dir, "$videoId.m4a")
+    fun getDedicatedDownloadDir(context: Context): File {
+        try {
+            val publicMusic = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC)
+            val auraPublic = File(publicMusic, "AuraMusic")
+            if (auraPublic.exists() || auraPublic.mkdirs()) {
+                return auraPublic
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Cannot access public Music directory: ${e.message}")
+        }
+        val extDir = context.getExternalFilesDir(Environment.DIRECTORY_MUSIC)
+        val auraExt = File(extDir, "AuraMusic")
+        if (auraExt.exists() || auraExt.mkdirs()) {
+            return auraExt
+        }
+        val internalDir = File(context.filesDir, "aura_offline_tracks")
+        if (!internalDir.exists()) internalDir.mkdirs()
+        return internalDir
     }
 
-    suspend fun downloadTrackOffline(context: Context, track: AuraTrack): File? = withContext(Dispatchers.IO) {
+    fun getOfflineFile(context: Context, videoId: String): File {
+        val dedicated = File(getDedicatedDownloadDir(context), "$videoId.m4a")
+        if (dedicated.exists() && dedicated.length() > 10_000L) return dedicated
+        val fallback = File(context.filesDir, "aura_offline_tracks/$videoId.m4a")
+        if (fallback.exists() && fallback.length() > 10_000L) return fallback
+        return dedicated
+    }
+
+    suspend fun downloadTrackOffline(
+        context: Context,
+        track: AuraTrack,
+        onProgress: (bytesRead: Long, totalBytes: Long, progress: Float) -> Unit = { _, _, _ -> }
+    ): File? = withContext(Dispatchers.IO) {
         try {
             val resolved = SimpMusicExtractorEngine.resolveStream(track.videoId)
             val targetFile = getOfflineFile(context, track.videoId)
@@ -637,9 +762,25 @@ object AuraPlayerManager {
             SimpMusicExtractorEngine.httpClient.newCall(req).execute().use { resp ->
                 if (!resp.isSuccessful) return@withContext null
                 val body = resp.body ?: return@withContext null
+                val totalBytes = body.contentLength().takeIf { it > 0 } ?: (track.durationSeconds * 20_000L)
+                var bytesReadTotal = 0L
+
                 targetFile.outputStream().use { out ->
                     body.byteStream().use { input ->
-                        input.copyTo(out)
+                        val buffer = ByteArray(16 * 1024)
+                        var read: Int
+                        var lastProgressUpdate = 0L
+                        while (input.read(buffer).also { read = it } != -1) {
+                            out.write(buffer, 0, read)
+                            bytesReadTotal += read
+                            val now = System.currentTimeMillis()
+                            if (now - lastProgressUpdate > 100 || bytesReadTotal == totalBytes) {
+                                lastProgressUpdate = now
+                                val progress = (bytesReadTotal.toFloat() / totalBytes.coerceAtLeast(1L)).coerceIn(0f, 1f)
+                                onProgress(bytesReadTotal, totalBytes, progress)
+                            }
+                        }
+                        onProgress(bytesReadTotal, totalBytes, 1f)
                     }
                 }
             }
@@ -647,6 +788,124 @@ object AuraPlayerManager {
         } catch (e: Exception) {
             Log.e(TAG, "Offline download failed for ${track.videoId}: ${e.message}")
             null
+        }
+    }
+
+    fun setVideoLoading(loading: Boolean) {
+        _isVideoLoading.value = loading
+    }
+
+    /**
+     * Seamlessly launches official music video playback while preserving the original
+     * Spotify song artwork, metadata, and playlist queue.
+     */
+    fun playVideoForTrack(videoTrack: AuraTrack, fromAudioTrack: AuraTrack? = null) {
+        val currentAudio = fromAudioTrack ?: currentTrack.value
+        if (currentAudio != null && originalAudioTrack == null) {
+            originalAudioTrack = currentAudio
+            originalAudioQueue = _queue.value
+            originalAudioIndex = exoPlayer?.currentMediaItemIndex ?: -1
+        }
+        _isVideoMode.value = true
+
+        // Preserve Spotify high-res album cover & album metadata so UI remains visually pristine
+        val preservedTrack = videoTrack.copy(
+            artworkUrl = currentAudio?.highResArtworkUrl ?: videoTrack.artworkUrl,
+            album = currentAudio?.album ?: videoTrack.album
+        )
+        _currentTrack.value = preservedTrack
+
+        scope.launch {
+            _isVideoLoading.value = true
+            val resolved = withContext(Dispatchers.IO) {
+                SimpMusicExtractorEngine.resolveVideoStream(videoTrack.videoId)
+            }
+            _isVideoLoading.value = false
+
+            val player = exoPlayer ?: return@launch
+            val currentPos = player.currentPosition
+            val wasPlaying = player.isPlaying
+
+            if (resolved != null) {
+                _streamSourceTier.value = "Video HD • ${resolved.quality}"
+                val cFactory = cacheDataSourceFactory ?: DefaultDataSource.Factory(appContext!!)
+
+                val mediaSource = if (!resolved.audioUrl.isNullOrBlank()) {
+                    // Combine HD 1080p/720p video stream + high-fidelity 160kbps audio stream!
+                    val videoSource = ProgressiveMediaSource.Factory(cFactory)
+                        .createMediaSource(MediaItem.fromUri(Uri.parse(resolved.streamUrl)))
+                    val audioSource = ProgressiveMediaSource.Factory(cFactory)
+                        .createMediaSource(MediaItem.fromUri(Uri.parse(resolved.audioUrl)))
+                    MergingMediaSource(videoSource, audioSource)
+                } else {
+                    ProgressiveMediaSource.Factory(cFactory)
+                        .createMediaSource(MediaItem.fromUri(Uri.parse(resolved.streamUrl)))
+                }
+
+                player.setMediaSource(mediaSource, currentPos)
+                player.prepare()
+                if (wasPlaying) {
+                    player.play()
+                }
+            } else {
+                val mediaItem = buildMediaItem(preservedTrack)
+                player.setMediaItem(mediaItem, currentPos)
+                player.prepare()
+                if (wasPlaying) {
+                    player.play()
+                }
+            }
+        }
+    }
+
+    /**
+     * Restores the exact original Spotify song, artwork, and full playlist queue
+     * when switching back from video mode to audio mode.
+     */
+    fun switchToAudioMode() {
+        if (!_isVideoMode.value) return
+        _isVideoMode.value = false
+        val player = exoPlayer ?: return
+        val currentPos = player.currentPosition
+        val wasPlaying = player.isPlaying
+
+        val origTrack = originalAudioTrack
+        val origQueue = originalAudioQueue
+        val origIndex = originalAudioIndex
+
+        originalAudioTrack = null
+        originalAudioQueue = null
+        originalAudioIndex = -1
+
+        if (origTrack != null) {
+            _currentTrack.value = origTrack
+            if (origQueue != null) {
+                _queue.value = origQueue
+            }
+            val mediaItem = buildMediaItem(origTrack)
+            player.setMediaItem(mediaItem, currentPos)
+            player.prepare()
+            if (wasPlaying) {
+                player.play()
+            }
+        } else {
+            val cur = currentTrack.value ?: return
+            val mediaItem = buildMediaItem(cur)
+            player.setMediaItem(mediaItem, currentPos)
+            player.prepare()
+            if (wasPlaying) {
+                player.play()
+            }
+        }
+    }
+
+    fun setVideoMode(enabled: Boolean) {
+        if (_isVideoMode.value == enabled) return
+        if (!enabled) {
+            switchToAudioMode()
+        } else {
+            val cur = currentTrack.value ?: return
+            playVideoForTrack(cur)
         }
     }
 
@@ -661,9 +920,10 @@ object AuraPlayerManager {
             .setIsPlayable(true)
             .build()
 
+        val schemeHost = if (_isVideoMode.value) "aura://video/" else "aura://track/"
         return MediaItem.Builder()
             .setMediaId(track.videoId)
-            .setUri(Uri.parse("aura://track/${track.videoId}"))
+            .setUri(Uri.parse("$schemeHost${track.videoId}"))
             .setMediaMetadata(metadata)
             .build()
     }
@@ -716,7 +976,11 @@ object AuraPlayerManager {
             Log.w(TAG, "Equalizer curve apply notice: ${e.message}")
         }
 
-        val gain = if (enabled) preset.preampGain else 1.0f
+        // Anti-Clipping Headroom: calculate max band boost and apply negative headroom
+        // so boosted low/high frequencies never clip against 0 dBFS ceiling
+        val maxBoost = if (enabled) preset.bandsDb.maxOrNull()?.coerceAtLeast(0f) ?: 0f else 0f
+        val safeHeadroom = if (maxBoost > 0f) Math.pow(10.0, -maxBoost.toDouble() / 20.0).toFloat() else 1.0f
+        val gain = if (enabled) (preset.preampGain * safeHeadroom) else 1.0f
         baseVolume = gain.coerceIn(0.2f, 1.0f)
         if (fadeJob?.isActive != true) {
             player.volume = baseVolume

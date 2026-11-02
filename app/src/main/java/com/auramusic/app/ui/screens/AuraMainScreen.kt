@@ -1,6 +1,14 @@
 package com.auramusic.app.ui.screens
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.ContextCompat
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.animateContentSize
@@ -188,6 +196,43 @@ fun AuraMainScreen(viewModel: AuraViewModel) {
     val showRomanized by viewModel.showRomanizedLyrics.collectAsState()
     val rydData by viewModel.rydData.collectAsState()
     val nowPlayingStyle by viewModel.nowPlayingStyle.collectAsState()
+    val isVideoMode by viewModel.isVideoMode.collectAsState()
+    val isVideoLoading by viewModel.isVideoLoading.collectAsState()
+    val livePerformances by viewModel.livePerformances.collectAsState()
+    val isLoadingLivePerformances by viewModel.isLoadingLivePerformances.collectAsState()
+    val downloadProgress by viewModel.downloadProgress.collectAsState()
+
+    val context = LocalContext.current
+    var pendingDownloadAction by remember { mutableStateOf<(() -> Unit)?>(null) }
+
+    val storagePermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        val anyGranted = permissions.values.any { it }
+        if (anyGranted) {
+            pendingDownloadAction?.invoke()
+        } else {
+            Toast.makeText(context, "Storage permission is needed to save offline music", Toast.LENGTH_SHORT).show()
+        }
+        pendingDownloadAction = null
+    }
+
+    val requestDownloadWithPermission: (() -> Unit) -> Unit = { action ->
+        val neededPermissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            arrayOf(Manifest.permission.READ_MEDIA_AUDIO)
+        } else {
+            arrayOf(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+        }
+        val ungranted = neededPermissions.filter {
+            ContextCompat.checkSelfPermission(context, it) != PackageManager.PERMISSION_GRANTED
+        }
+        if (ungranted.isEmpty()) {
+            action()
+        } else {
+            pendingDownloadAction = action
+            storagePermissionLauncher.launch(ungranted.toTypedArray())
+        }
+    }
 
     Box(
         modifier = Modifier
@@ -209,6 +254,7 @@ fun AuraMainScreen(viewModel: AuraViewModel) {
                     favorites = favorites,
                     downloads = downloads,
                     downloadingIds = downloadingIds,
+                    downloadProgressMap = downloadProgress,
                     currentPlayingId = currentTrack?.videoId,
                     isPlaying = isPlaying,
                     recentlyPlayed = recentlyPlayed,
@@ -231,7 +277,7 @@ fun AuraMainScreen(viewModel: AuraViewModel) {
                     onSelectCategory = { category -> viewModel.selectCategory(category) },
                     onPlayMood = { mood -> viewModel.playMoodCategory(mood) },
                     onToggleFavorite = { track -> viewModel.toggleFavorite(track) },
-                    onDownloadTrack = { track -> viewModel.downloadTrack(track) },
+                    onDownloadTrack = { track -> requestDownloadWithPermission { viewModel.downloadTrack(track) } },
                     onRefresh = { viewModel.refreshHome() }
                 )
                 1 -> SearchScreen(
@@ -252,7 +298,10 @@ fun AuraMainScreen(viewModel: AuraViewModel) {
                     onPlayTrack = { track, queue -> viewModel.playTrack(track, queue) },
                     onPlaySearchTrack = { track, results -> viewModel.playSearchTrack(track, results) },
                     onToggleFavorite = { viewModel.toggleFavorite(it) },
-                    onDownloadTrack = { viewModel.downloadTrack(it) },
+                    onDownloadTrack = { track -> requestDownloadWithPermission { viewModel.downloadTrack(track) } },
+                    playlists = playlists,
+                    onAddTrackToPlaylist = { plId, track -> viewModel.addTrackToPlaylist(plId, track) },
+                    onCreatePlaylist = { name, desc, cover -> viewModel.createPlaylist(name, desc, cover) },
                     onRemoveRecentlyPlayed = { viewModel.removeFromRecentlyPlayed(it) },
                     onOpenArtist = { artistName, songTitle -> viewModel.openArtistByName(artistName, songTitle) }
                 )
@@ -262,6 +311,7 @@ fun AuraMainScreen(viewModel: AuraViewModel) {
                     playlists = playlists,
                     stats = listeningStats,
                     downloadingIds = downloadingIds,
+                    downloadProgressMap = downloadProgress,
                     currentPlayingId = currentTrack?.videoId,
                     isPlaying = isPlaying,
                     spotifyImportStatus = spotifyImportStatus,
@@ -278,10 +328,14 @@ fun AuraMainScreen(viewModel: AuraViewModel) {
                     onDismissImportSuccess = { viewModel.dismissImportSuccessModal() },
                     onPlayTrack = { track, queue -> viewModel.playTrack(track, queue) },
                     onToggleFavorite = { viewModel.toggleFavorite(it) },
-                    onDownloadTrack = { viewModel.downloadTrack(it) },
+                    onDownloadTrack = { track -> requestDownloadWithPermission { viewModel.downloadTrack(track) } },
+                    onRemoveDownload = { track -> viewModel.removeDownload(track) },
                     onUpdatePlaylistCover = { id, cover -> viewModel.updatePlaylistCover(id, cover) },
                     onUpdatePlaylistTitle = { id, title -> viewModel.updatePlaylistTitle(id, title) },
                     onDeletePlaylist = { id -> viewModel.deletePlaylist(id) },
+                    onRemoveTrackFromPlaylist = { plId, vId -> viewModel.removeTrackFromPlaylist(plId, vId) },
+                    onCreatePlaylist = { name, desc, cover -> viewModel.createPlaylist(name, desc, cover) },
+                    onAddTrackToPlaylist = { plId, track -> viewModel.addTrackToPlaylist(plId, track) },
                     onOpenArtist = { artistName -> viewModel.openArtistByName(artistName) }
                 )
                 3 -> SettingsScreen(viewModel = viewModel)
@@ -539,6 +593,10 @@ fun AuraMainScreen(viewModel: AuraViewModel) {
                     isShuffleEnabled = isShuffleEnabled,
                     queue = queue,
                     currentStyle = nowPlayingStyle,
+                    isVideoMode = isVideoMode,
+                    isVideoLoading = isVideoLoading,
+                    livePerformances = livePerformances,
+                    isLoadingLivePerformances = isLoadingLivePerformances,
                     onCollapse = { isPlayerExpanded = false },
                     onTogglePlayPause = { AuraPlayerManager.togglePlayPause() },
                     onSeekTo = { AuraPlayerManager.seekToSeconds(it) },
@@ -546,6 +604,9 @@ fun AuraMainScreen(viewModel: AuraViewModel) {
                     onSkipPrevious = { AuraPlayerManager.skipToPrevious() },
                     onToggleFavorite = { viewModel.toggleFavorite(activeTrack) },
                     onToggleShuffle = { AuraPlayerManager.toggleShuffle() },
+                    onToggleVideoMode = { viewModel.toggleVideoMode() },
+                    onLoadLivePerformances = { viewModel.loadLivePerformances() },
+                    onPlayLivePerformance = { viewModel.playLivePerformance(it) },
                     onToggleStyle = {
                         viewModel.setNowPlayingStyle(
                             if (nowPlayingStyle == com.auramusic.app.domain.model.NowPlayingStyle.SPOTIFY)
@@ -558,6 +619,13 @@ fun AuraMainScreen(viewModel: AuraViewModel) {
                         isPlayerExpanded = false
                         viewModel.openArtistByName(artistName, activeTrack.title, activeTrack.highResArtworkUrl)
                     },
+                    isDownloaded = downloads.any { it.videoId == activeTrack.videoId && it.isDownloaded },
+                    isDownloading = downloadingIds.contains(activeTrack.videoId),
+                    onDownloadTrack = { track -> requestDownloadWithPermission { viewModel.downloadTrack(track) } },
+                    onRemoveDownload = { track -> viewModel.removeDownload(track) },
+                    playlists = playlists,
+                    onAddTrackToPlaylist = { plId, track -> viewModel.addTrackToPlaylist(plId, track) },
+                    onCreatePlaylist = { name, desc, cover -> viewModel.createPlaylist(name, desc, cover) },
                     onPlayQueueTrack = { viewModel.playTrack(it, queue) },
                     onAdjustLyricsOffset = { viewModel.adjustLyricsOffset(it) },
                     onToggleRomanized = { viewModel.toggleRomanizedLyrics() }
@@ -566,7 +634,6 @@ fun AuraMainScreen(viewModel: AuraViewModel) {
         }
 
         // In-App Update Modal
-        val context = LocalContext.current
         val isUpdateModalVisible by viewModel.isUpdateModalVisible.collectAsState()
         val currentUpdateRelease by viewModel.currentUpdateRelease.collectAsState()
         val updateState by viewModel.updateState.collectAsState()

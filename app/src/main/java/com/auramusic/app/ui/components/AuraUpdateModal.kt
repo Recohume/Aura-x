@@ -172,7 +172,7 @@ fun AuraUpdateModal(
                 ) {
                     Image(
                         painter = painterResource(id = R.drawable.aura_logo),
-                        contentDescription = "Aura Music Logo",
+                        contentDescription = "Aura Logo",
                         modifier = Modifier
                             .size(64.dp)
                             .clip(CircleShape)
@@ -213,8 +213,8 @@ fun AuraUpdateModal(
                 Spacer(modifier = Modifier.height(8.dp))
 
                 // Version Diff Text Row (matching Yomite minimal inline design: no pill border/background)
-                val cleanCurrent = currentVersion.trim().removePrefix("v").removePrefix("V").ifBlank { "1.2" }
-                val cleanRemote = release.version.trim().removePrefix("v").removePrefix("V").ifBlank { "1.3" }
+                val cleanCurrent = currentVersion.trim().removePrefix("v").removePrefix("V").ifBlank { "1.3" }
+                val cleanRemote = release.version.trim().removePrefix("v").removePrefix("V").ifBlank { "1.4" }
 
                 Row(
                     modifier = Modifier.padding(top = 6.dp),

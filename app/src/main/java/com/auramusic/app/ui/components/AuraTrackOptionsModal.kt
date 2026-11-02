@@ -15,11 +15,14 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.QueueMusic
+import androidx.compose.material.icons.rounded.DeleteOutline
+import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.DownloadDone
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
-import androidx.compose.material.icons.rounded.LibraryAdd
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.PlaylistAdd
+import androidx.compose.material.icons.rounded.Videocam
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -56,7 +59,12 @@ fun AuraTrackOptionsModal(
     onAddToQueue: () -> Unit,
     onToggleFavorite: () -> Unit,
     onAddToPlaylist: () -> Unit = {},
-    onGoToArtist: (() -> Unit)? = null
+    onGoToArtist: (() -> Unit)? = null,
+    isDownloaded: Boolean = false,
+    onDownloadTrack: (() -> Unit)? = null,
+    onRemoveDownload: (() -> Unit)? = null,
+    onRemoveFromPlaylist: (() -> Unit)? = null,
+    onWatchVideo: (() -> Unit)? = null
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
@@ -144,22 +152,67 @@ fun AuraTrackOptionsModal(
             TrackOptionRow(
                 icon = if (isFavorite) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
                 label = if (isFavorite) "Remove from Liked Songs" else "Save to Liked Songs",
-                iconTint = if (isFavorite) AuraNeonLime else Color.White,
+                iconTint = Color.White,
                 onClick = onToggleFavorite
             )
 
             // Option 4: Add to Playlist
             TrackOptionRow(
-                icon = Icons.Rounded.LibraryAdd,
+                icon = Icons.Rounded.PlaylistAdd,
                 label = "Add to Playlist",
+                iconTint = Color.White,
                 onClick = onAddToPlaylist
             )
 
-            // Option 5: Go to Artist (optional)
+            // Option 5: Download Song (Offline Access) or Remove from Downloads
+            if (isDownloaded && onRemoveDownload != null) {
+                TrackOptionRow(
+                    icon = Icons.Rounded.DeleteOutline,
+                    label = "Remove from Downloads",
+                    iconTint = Color.White,
+                    onClick = onRemoveDownload
+                )
+            } else if (onDownloadTrack != null) {
+                TrackOptionRow(
+                    icon = if (isDownloaded) Icons.Rounded.DeleteOutline else Icons.Rounded.Download,
+                    label = if (isDownloaded) "Remove from Downloads" else "Download Song",
+                    iconTint = Color.White,
+                    onClick = {
+                        if (isDownloaded && onRemoveDownload != null) {
+                            onRemoveDownload()
+                        } else {
+                            onDownloadTrack()
+                        }
+                    }
+                )
+            }
+
+            // Option 5b: Remove from Playlist (when viewing inside a playlist)
+            if (onRemoveFromPlaylist != null) {
+                TrackOptionRow(
+                    icon = Icons.Rounded.DeleteOutline,
+                    label = "Remove from Playlist",
+                    iconTint = Color.White,
+                    onClick = onRemoveFromPlaylist
+                )
+            }
+
+            // Option 6: Watch Music Video
+            if (onWatchVideo != null) {
+                TrackOptionRow(
+                    icon = Icons.Rounded.Videocam,
+                    label = "Watch Music Video",
+                    iconTint = Color.White,
+                    onClick = onWatchVideo
+                )
+            }
+
+            // Option 7: Go to Artist (optional)
             if (onGoToArtist != null) {
                 TrackOptionRow(
                     icon = Icons.Rounded.Person,
-                    label = "Go to Artist",
+                    label = "View Artist",
+                    iconTint = Color.White,
                     onClick = onGoToArtist
                 )
             }
@@ -168,7 +221,7 @@ fun AuraTrackOptionsModal(
 }
 
 @Composable
-private fun TrackOptionRow(
+fun TrackOptionRow(
     icon: ImageVector,
     label: String,
     iconTint: Color = Color.White,

@@ -46,19 +46,20 @@ data class AuraTrack(
 
 /**
  * Normalizes artwork URLs from YouTube Music, Google User Content, and YouTube CDN
- * to fetch high-definition (544x544 square / 720p HD) images.
+ * to fetch reliable high-definition images with zero 404 black screens.
  */
 fun toHighResArtwork(url: String, videoId: String = ""): String {
-    if (url.isBlank() && videoId.isNotBlank()) {
-        return "https://i.ytimg.com/vi/$videoId/hq720.jpg"
+    val cleanUrl = if (url.startsWith("//")) "https:$url" else url.trim()
+    if (cleanUrl.isBlank() && videoId.isNotBlank()) {
+        return "https://i.ytimg.com/vi/$videoId/hqdefault.jpg"
     }
-    if (url.isBlank()) return ""
+    if (cleanUrl.isBlank()) return ""
 
     return when {
         // Google User Content / Ggpht (YouTube Music standard square CDN)
-        url.contains("googleusercontent.com") || url.contains("ggpht.com") -> {
+        cleanUrl.contains("googleusercontent.com") || cleanUrl.contains("ggpht.com") -> {
             // Strip any low-res signed query parameters (?sqp=...)
-            val clean = url.substringBefore("?")
+            val clean = cleanUrl.substringBefore("?")
             if (clean.contains("=")) {
                 // Replaces =s60, =s120, =s540, =w60-h60, =w120-h120 with official YTM 544x544 square album art
                 clean.replace(Regex("=.*$"), "=w544-h544-l90-rj")
@@ -67,16 +68,14 @@ fun toHighResArtwork(url: String, videoId: String = ""): String {
             }
         }
         // Spotify CDN (already native crisp 640x640)
-        url.contains("i.scdn.co") -> url
+        cleanUrl.contains("i.scdn.co") -> cleanUrl
         // YouTube video thumbnails (img.youtube.com or i.ytimg.com)
-        url.contains("youtube.com") || url.contains("ytimg.com") -> {
-            when {
-                url.contains("hqdefault.jpg") -> url.replace("hqdefault.jpg", "hq720.jpg")
-                url.contains("maxresdefault.jpg") -> url.replace("maxresdefault.jpg", "hq720.jpg")
-                else -> url
-            }
+        cleanUrl.contains("youtube.com") || cleanUrl.contains("ytimg.com") -> {
+            // Keep hqdefault.jpg as it is guaranteed to exist on YouTube servers for 100% of videos
+            // (hq720.jpg causes 404 and black screen for videos that were not uploaded in HD)
+            cleanUrl.substringBefore("?")
         }
-        else -> url
+        else -> cleanUrl
     }
 }
 
@@ -291,4 +290,14 @@ data class PlaylistDetail(
     val tracks: List<PlaylistTrackItem>,
     val totalViews: String = ""
 )
+
+data class ResolvedVideoStream(
+    val videoId: String,
+    val streamUrl: String,
+    val quality: String = "720p",
+    val durationSeconds: Int = 0,
+    val isLive: Boolean = false,
+    val audioUrl: String? = null
+)
+
 

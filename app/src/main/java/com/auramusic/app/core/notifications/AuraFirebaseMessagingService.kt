@@ -23,8 +23,8 @@ class AuraFirebaseMessagingService : FirebaseMessagingService() {
                 data["type"] == "release" ||
                 remoteMessage.from?.contains("releases") == true
 
-        val title = notification?.title ?: data["title"] ?: "AURA Music Update"
-        val body = notification?.body ?: data["body"] ?: "A new version of AURA Music is available!"
+        val title = notification?.title ?: data["title"] ?: "Aura Update"
+        val body = notification?.body ?: data["body"] ?: "A new version of Aura is available!"
         val version = data["version"] ?: "latest"
 
         if (isUpdateType) {

@@ -8,6 +8,7 @@ import com.auramusic.app.domain.model.AuraTrack
 import com.auramusic.app.domain.model.MoodCategory
 import com.auramusic.app.domain.model.PlaylistDetail
 import com.auramusic.app.domain.model.PlaylistTrackItem
+import com.auramusic.app.domain.model.ResolvedVideoStream
 import com.auramusic.app.domain.model.YtmChartSection
 import com.auramusic.app.domain.model.YtmCommunityPlaylist
 import com.auramusic.app.domain.model.YtmTopArtist
@@ -68,6 +69,8 @@ object SimpMusicExtractorEngine {
 
     // Tier 0 In-memory Resolved Stream Cache (videoId -> ResolvedStream)
     private val streamCache = ConcurrentHashMap<String, ResolvedStream>()
+    // Tier 0 In-memory Resolved Video Stream Cache (videoId -> ResolvedVideoStream)
+    private val videoStreamCache = ConcurrentHashMap<String, ResolvedVideoStream>()
 
     val httpClient: OkHttpClient by lazy {
         OkHttpClient.Builder()
@@ -359,6 +362,264 @@ object SimpMusicExtractorEngine {
     }
 
     /**
+     * Resolves a video stream for video playback mode.
+     * Prioritizes high-definition 1080p/720p video paired with high-bitrate audio,
+     * with graceful fallback to progressive muxed MP4 streams.
+     */
+    suspend fun resolveVideoStream(videoId: String): ResolvedVideoStream? = withContext(Dispatchers.IO) {
+        initExtractors()
+        videoStreamCache[videoId]?.let { return@withContext it }
+
+        // Tier 1: PipePipeExtractor
+        try {
+            YoutubeApiDecoder.setLocalDecoder(null)
+            val url = "https://www.youtube.com/watch?v=$videoId"
+            val streamInfo = PipePipeStreamInfo.getInfo(PipePipeServiceList.YouTube, url)
+
+            // Step 1: Check for high-definition video-only stream (1080p / 720p) + crisp audio stream
+            val videoOnly = streamInfo.videoOnlyStreams
+            val audioStreams = streamInfo.audioStreams
+            if (!videoOnly.isNullOrEmpty() && !audioStreams.isNullOrEmpty()) {
+                val hdVideo = videoOnly
+                    .filter { it.height >= 720 && !it.content.isNullOrBlank() }
+                    .maxByOrNull { it.height }
+                val bestAudio = audioStreams
+                    .filter { !it.content.isNullOrBlank() }
+                    .maxByOrNull { it.averageBitrate } ?: audioStreams.firstOrNull()
+
+                if (hdVideo != null && bestAudio != null) {
+                    val verifiedVideo = verifyPlayableUrl(hdVideo.content)
+                    val verifiedAudio = verifyPlayableUrl(bestAudio.content)
+                    if (verifiedVideo != null && verifiedAudio != null) {
+                        val resolved = ResolvedVideoStream(
+                            videoId = videoId,
+                            streamUrl = verifiedVideo,
+                            quality = "${hdVideo.height}p HD",
+                            durationSeconds = streamInfo.duration.toInt().coerceAtLeast(0),
+                            audioUrl = verifiedAudio
+                        )
+                        videoStreamCache[videoId] = resolved
+                        Log.i(TAG, "Tier 1 PipePipe resolved HD video+audio for $videoId (${resolved.quality})")
+                        return@withContext resolved
+                    }
+                }
+            }
+
+            // Step 2: Fallback to progressive muxed video streams (720p / 360p)
+            val videoStreams = streamInfo.videoStreams
+            if (!videoStreams.isNullOrEmpty()) {
+                val sorted = videoStreams.filter { !it.content.isNullOrBlank() }.sortedByDescending { it.height }
+                for (stream in sorted) {
+                    val rawUrl = stream.content
+                    val verifiedUrl = verifyPlayableUrl(rawUrl)
+                    if (verifiedUrl != null) {
+                        val resolved = ResolvedVideoStream(
+                            videoId = videoId,
+                            streamUrl = verifiedUrl,
+                            quality = stream.resolution ?: "${stream.height}p",
+                            durationSeconds = streamInfo.duration.toInt().coerceAtLeast(0),
+                            audioUrl = null
+                        )
+                        videoStreamCache[videoId] = resolved
+                        Log.i(TAG, "Tier 1 PipePipe resolved progressive video for $videoId (${resolved.quality})")
+                        return@withContext resolved
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Tier 1 PipePipe video error for $videoId: ${e.message}")
+        }
+
+        // Tier 2: BraveNewPipe
+        try {
+            val url = "https://www.youtube.com/watch?v=$videoId"
+            val streamInfo = BraveStreamInfo.getInfo(BraveServiceList.YouTube, url)
+
+            // Step 1: Check for high-definition video-only stream (1080p / 720p) + crisp audio stream
+            val videoOnly = streamInfo.videoOnlyStreams
+            val audioStreams = streamInfo.audioStreams
+            if (!videoOnly.isNullOrEmpty() && !audioStreams.isNullOrEmpty()) {
+                val hdVideo = videoOnly
+                    .filter { it.height >= 720 && !it.content.isNullOrBlank() }
+                    .maxByOrNull { it.height }
+                val bestAudio = audioStreams
+                    .filter { !it.content.isNullOrBlank() }
+                    .maxByOrNull { it.averageBitrate } ?: audioStreams.firstOrNull()
+
+                if (hdVideo != null && bestAudio != null) {
+                    val verifiedVideo = verifyPlayableUrl(hdVideo.content)
+                    val verifiedAudio = verifyPlayableUrl(bestAudio.content)
+                    if (verifiedVideo != null && verifiedAudio != null) {
+                        val resolved = ResolvedVideoStream(
+                            videoId = videoId,
+                            streamUrl = verifiedVideo,
+                            quality = "${hdVideo.height}p HD",
+                            durationSeconds = streamInfo.duration.toInt().coerceAtLeast(0),
+                            audioUrl = verifiedAudio
+                        )
+                        videoStreamCache[videoId] = resolved
+                        Log.i(TAG, "Tier 2 BraveNewPipe resolved HD video+audio for $videoId (${resolved.quality})")
+                        return@withContext resolved
+                    }
+                }
+            }
+
+            // Step 2: Fallback to progressive muxed video streams
+            val videoStreams = streamInfo.videoStreams
+            if (!videoStreams.isNullOrEmpty()) {
+                val sorted = videoStreams.filter { !it.content.isNullOrBlank() }.sortedByDescending { it.height }
+                for (stream in sorted) {
+                    val rawUrl = stream.content
+                    val verifiedUrl = verifyPlayableUrl(rawUrl)
+                    if (verifiedUrl != null) {
+                        val resolved = ResolvedVideoStream(
+                            videoId = videoId,
+                            streamUrl = verifiedUrl,
+                            quality = stream.resolution ?: "${stream.height}p",
+                            durationSeconds = streamInfo.duration.toInt().coerceAtLeast(0),
+                            audioUrl = null
+                        )
+                        videoStreamCache[videoId] = resolved
+                        Log.i(TAG, "Tier 2 BraveNewPipe resolved progressive video for $videoId (${resolved.quality})")
+                        return@withContext resolved
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Tier 2 BraveNewPipe video error for $videoId: ${e.message}")
+        }
+
+        null
+    }
+
+    /**
+     * Resolves an authentic official music video for a track.
+     * Searches YouTube Music and YouTube for verified official music videos / MVs.
+     * Strictly filters out static audio tracks (e.g. YouTube Topic uploads) so cover art
+     * is NEVER maximized as a fake video.
+     * Returns null if no authentic official video stream is available.
+     */
+    suspend fun findOfficialMusicVideo(track: AuraTrack): AuraTrack? = withContext(Dispatchers.IO) {
+        try {
+            // If the current track is already explicitly an official music video (and not a Topic audio upload)
+            val lowerCurrentTitle = track.title.lowercase()
+            val lowerCurrentArtist = track.artist.lowercase()
+            val isCurrentAlreadyMv = (lowerCurrentTitle.contains("official video") ||
+                    lowerCurrentTitle.contains("music video") ||
+                    lowerCurrentTitle.contains("official mv") ||
+                    lowerCurrentTitle.endsWith("mv")) &&
+                    !lowerCurrentArtist.contains("topic") &&
+                    !lowerCurrentTitle.contains("audio") &&
+                    !lowerCurrentTitle.contains("lyric")
+
+            if (isCurrentAlreadyMv) {
+                val direct = resolveVideoStream(track.videoId)
+                if (direct != null) {
+                    return@withContext track
+                }
+            }
+
+            // Clean artist and title for YouTube search
+            val cleanArtist = track.artist.split(",", "&", "feat.", "ft.", "/").firstOrNull()?.trim() ?: track.artist
+            val cleanTitle = track.title
+                .replace(Regex("(?i)\\(feat\\..*?\\)|\\[feat\\..*?\\]"), "")
+                .replace(Regex("(?i)\\b(official|music|video|audio|lyrics?|visualizer|remastered|remaster|hd|hq|4k)\\b"), "")
+                .substringBefore("(")
+                .substringBefore("[")
+                .substringBefore("-")
+                .trim()
+
+            val query = "$cleanArtist $cleanTitle official music video"
+
+            // 1. Search YouTube Music with video filter
+            val results = searchYouTubeMusic(query, filter = "videos")
+
+            var candidate = results.firstOrNull { item ->
+                val lower = item.title.lowercase()
+                val lowerArtist = item.artist.lowercase()
+                val hasKeyword = lower.contains("official") || lower.contains("video") || lower.contains(" mv") || lower.endsWith("mv")
+                val isExcluded = lower.contains("audio") || lower.contains("lyric") || lower.contains("live") ||
+                        lower.contains("karaoke") || lower.contains("instrumental") || lower.contains("acoustic") ||
+                        lower.contains("reaction") || lowerArtist.contains("topic") || item.videoId == track.videoId
+                hasKeyword && !isExcluded
+            }
+
+            // 2. Direct YouTube fallback search via NewPipe extractor if YouTube Music didn't find an MV
+            if (candidate == null) {
+                try {
+                    initExtractors()
+                    val extractor = BraveServiceList.YouTube.getSearchExtractor(query)
+                    extractor.fetchPage()
+                    val items = extractor.initialPage?.items ?: emptyList()
+                    val ytItem = items.filterIsInstance<StreamInfoItem>().firstOrNull { item ->
+                        val t = item.name?.lowercase() ?: ""
+                        val u = item.uploaderName?.lowercase() ?: ""
+                        val vidId = item.url?.substringAfter("v=")?.substringBefore("&") ?: ""
+                        val hasKeyword = t.contains("official") || t.contains("video") || t.contains(" mv") || t.endsWith("mv")
+                        val isExcluded = t.contains("audio") || t.contains("lyric") || t.contains("live") ||
+                                t.contains("karaoke") || t.contains("instrumental") || t.contains("reaction") ||
+                                u.contains("topic") || vidId == track.videoId
+                        hasKeyword && !isExcluded && vidId.isNotBlank()
+                    }
+                    if (ytItem != null) {
+                        val vidId = ytItem.url?.substringAfter("v=")?.substringBefore("&") ?: ""
+                        candidate = AuraTrack(
+                            id = "yt_$vidId",
+                            videoId = vidId,
+                            title = ytItem.name ?: "Official Music Video",
+                            artist = ytItem.uploaderName?.replace(" - Topic", "")?.trim() ?: cleanArtist,
+                            album = "Official Music Video",
+                            durationSeconds = ytItem.duration.toInt().coerceAtLeast(180),
+                            artworkUrl = ytItem.thumbnails?.lastOrNull()?.url ?: "https://img.youtube.com/vi/$vidId/hqdefault.jpg"
+                        )
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Direct YouTube MV search notice: ${e.message}")
+                }
+            }
+
+            if (candidate != null) {
+                val candidateStream = resolveVideoStream(candidate.videoId)
+                if (candidateStream != null) {
+                    return@withContext candidate
+                }
+            }
+
+            // NEVER fallback to track.videoId if it's an audio song, preventing static cover art playback in video player
+            null
+        } catch (e: Exception) {
+            Log.w(TAG, "findOfficialMusicVideo notice: ${e.message}")
+            null
+        }
+    }
+
+    /**
+     * Searches YouTube Music for live performances, concert footage, and official music videos for a track.
+     */
+    suspend fun fetchLivePerformancesAndVideos(track: AuraTrack): List<AuraTrack> = withContext(Dispatchers.IO) {
+        try {
+            val cleanArtist = track.artist.split(",", "&", "feat.", "ft.", "/").firstOrNull()?.trim() ?: track.artist
+            val cleanTitle = track.title.substringBefore("(").substringBefore("-").trim()
+            val query = "$cleanArtist $cleanTitle live"
+            val liveResults = searchYouTubeMusic(query, filter = "videos")
+
+            val mvResults = if (liveResults.size < 4) {
+                searchYouTubeMusic("$cleanArtist $cleanTitle music video", filter = "videos")
+            } else {
+                emptyList()
+            }
+
+            (liveResults + mvResults)
+                .distinctBy { it.videoId }
+                .filter { it.videoId != track.videoId }
+                .take(12)
+        } catch (e: Exception) {
+            Log.w(TAG, "Error fetching live performances: ${e.message}")
+            emptyList()
+        }
+    }
+
+    /**
      * Direct YouTube Music WEB_REMIX search (`https://music.youtube.com/youtubei/v1/search`)
      * with NewPipeExtractor fallback.
      */
@@ -367,9 +628,9 @@ object SimpMusicExtractorEngine {
             if (query.isBlank()) return@withContext emptyList()
             val normFilter = filter.lowercase().trim()
             val effectiveQuery = when (normFilter) {
-                "videos" -> "$query music video"
-                "playlists" -> "$query playlist"
-                "albums" -> "$query album"
+                "videos" -> if (query.contains("video", ignoreCase = true)) query else "$query music video"
+                "playlists" -> if (query.contains("playlist", ignoreCase = true)) query else "$query playlist"
+                "albums" -> if (query.contains("album", ignoreCase = true)) query else "$query album"
                 else -> query
             }
             try {

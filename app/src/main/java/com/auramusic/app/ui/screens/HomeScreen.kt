@@ -6,9 +6,11 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -34,6 +36,7 @@ import androidx.compose.material.icons.rounded.ArrowCircleDown
 import androidx.compose.material.icons.rounded.ArrowDownward
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.CheckCircleOutline
+import androidx.compose.material.icons.rounded.DownloadDone
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.LibraryMusic
@@ -46,6 +49,7 @@ import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -105,6 +109,7 @@ fun HomeScreen(
     favorites: List<AuraTrack>,
     downloads: List<AuraTrack>,
     downloadingIds: Set<String>,
+    downloadProgressMap: Map<String, Float> = emptyMap(),
     currentPlayingId: String? = null,
     isPlaying: Boolean = false,
     recentlyPlayed: List<AuraTrack> = emptyList(),
@@ -532,7 +537,7 @@ fun HomeScreen(
             val currentBatch = displayedTracks.take(visibleTrackCount)
             items(currentBatch, key = { it.videoId }) { track ->
                 val isFav = favorites.any { it.videoId == track.videoId }
-                val isDown = downloads.any { it.videoId == track.videoId }
+                val isDown = downloads.any { it.videoId == track.videoId && it.isDownloaded }
                 val isDownloading = downloadingIds.contains(track.videoId)
                 val isCurrent = currentPlayingId == track.videoId
 
@@ -542,6 +547,7 @@ fun HomeScreen(
                     isFavorite = isFav,
                     isDownloaded = isDown,
                     isDownloading = isDownloading,
+                    downloadProgress = downloadProgressMap[track.videoId],
                     onClick = { onPlayTrack(track, displayedTracks) },
                     onToggleFavorite = { onToggleFavorite(track) },
                     onDownload = { onDownloadTrack(track) }
@@ -920,6 +926,7 @@ private fun DiscoverWeeklyHeroCard(
 /**
  * Modern Encore tracklist row item with 16dp rounded artwork and circular play button (Screens 1 & 3)
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun SpotifyTrackRowItem(
     track: AuraTrack,
@@ -927,6 +934,7 @@ fun SpotifyTrackRowItem(
     isFavorite: Boolean,
     isDownloaded: Boolean,
     isDownloading: Boolean,
+    downloadProgress: Float? = null,
     onClick: () -> Unit,
     onToggleFavorite: () -> Unit,
     onDownload: () -> Unit,
@@ -935,12 +943,15 @@ fun SpotifyTrackRowItem(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = { onOptionsClick?.invoke() }
+            )
             .padding(horizontal = 20.dp, vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         AsyncImage(
-            model = track.highResArtworkUrl,
+            model = track.highResArtworkUrl.ifBlank { "https://i.ytimg.com/vi/${track.videoId}/hqdefault.jpg" },
             contentDescription = track.title,
             contentScale = ContentScale.Crop,
             modifier = Modifier
@@ -962,13 +973,45 @@ fun SpotifyTrackRowItem(
 
             Spacer(modifier = Modifier.height(3.dp))
 
-            Text(
-                text = "By ${track.artist} • ${track.durationSeconds / 60}m",
-                style = MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp),
-                color = TextSecondary,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
+            if (isDownloading) {
+                val pct = (((downloadProgress ?: 0.02f) * 100).toInt()).coerceIn(1, 100)
+                Text(
+                    text = "Downloading • $pct%",
+                    style = MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp),
+                    color = AuraNeonLime,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                LinearProgressIndicator(
+                    progress = { (downloadProgress ?: 0.02f).coerceIn(0f, 1f) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(3.dp)
+                        .clip(RoundedCornerShape(2.dp)),
+                    color = AuraNeonLime,
+                    trackColor = Color(0x33FFFFFF)
+                )
+            } else {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (isDownloaded) {
+                        Icon(
+                            imageVector = Icons.Rounded.DownloadDone,
+                            contentDescription = "Downloaded",
+                            tint = AuraNeonLime,
+                            modifier = Modifier.size(13.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                    }
+                    Text(
+                        text = "By ${track.artist} • ${track.durationSeconds / 60}m",
+                        style = MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp),
+                        color = TextSecondary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
         }
 
         Spacer(modifier = Modifier.width(8.dp))

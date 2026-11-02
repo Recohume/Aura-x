@@ -1,8 +1,8 @@
 <div align="center">
 
-<img src="./assets/icon.png" width="160" style="border-radius: 32px; box-shadow: 0 8px 32px rgba(0,0,0,0.5);" alt="AURA Music Icon"/>
+<img src="./assets/icon.png" width="160" style="border-radius: 36px; box-shadow: 0 10px 40px rgba(0,0,0,0.6);" alt="Aura Icon"/>
 
-# AURA Music
+# Aura
 
 ### Next-Generation FOSS YouTube Music Client for Android
 Built with **100% Native Kotlin**, **Jetpack Compose (Material 3)**, **AndroidX Media3 (ExoPlayer)**, and an ultra-fast, direct **Client-First InnerTube & PipePipe Extraction Engine**.
@@ -47,13 +47,13 @@ Built with **100% Native Kotlin**, **Jetpack Compose (Material 3)**, **AndroidX 
 ---
 
 > [!NOTE]
-> **AURA Music** is an independent, 100% free and open-source (FOSS) client-first YouTube Music experience. Designed from the ground up with **Warm Obsidian Glassmorphism**, dynamic album art palette color adaptation, word-by-word karaoke synchronized lyrics, integrated SponsorBlock, and dual customizable player styles (Spotify Encore & Blur Liquid Glass).
+> **Aura** is an independent, 100% free and open-source (FOSS) client-first YouTube Music experience. Designed from the ground up with **Warm Obsidian Glassmorphism**, dynamic album art palette color adaptation, word-by-word karaoke synchronized lyrics, integrated SponsorBlock, and dual customizable player styles (Spotify Encore & Blur Liquid Glass).
 
 ---
 
 ## Credits & Inspiration
 
-AURA Music stands on the shoulders of the extraordinary open-source community. We proudly credit and extend our deepest gratitude to the following pioneering repositories:
+Aura stands on the shoulders of the extraordinary open-source community. We proudly credit and extend our deepest gratitude to the following pioneering repositories:
 
 * **<a href="https://github.com/maxrave-dev/SimpMusic" target="_blank">SimpMusic (by maxrave-dev)</a>** — The foundational inspiration and architectural gold standard for our native client-side extraction, Media3 `ResolvingDataSource` + `SimpleCache` disk caching, 10-band equalizer DSP curves, RichSync synchronized lyrics integration, and SponsorBlock automation.
 * **<a href="https://github.com/z-huang/InnerTune" target="_blank">InnerTune (by z-huang)</a>** — The groundbreaking pioneer project that originated direct client-side exploration of YouTube Music's InnerTube API.

@@ -173,7 +173,7 @@ class AuraMediaService : MediaSessionService() {
         val currentTrack = AuraPlayerManager.currentTrack.value
         val isPlaying = AuraPlayerManager.isPlaying.value
 
-        val title = currentTrack?.title?.ifBlank { "Aura Music" } ?: "Aura Music"
+        val title = currentTrack?.title?.ifBlank { "Aura" } ?: "Aura"
         val artist = currentTrack?.artist?.ifBlank { "Playing" } ?: "Playing"
         val album = currentTrack?.album ?: ""
 

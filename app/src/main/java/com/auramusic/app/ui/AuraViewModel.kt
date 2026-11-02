@@ -1,6 +1,7 @@
 package com.auramusic.app.ui
 
 import android.app.Application
+import android.util.Log
 import android.widget.Toast
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -133,6 +134,9 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
     private val _downloadingIds = MutableStateFlow<Set<String>>(emptySet())
     val downloadingIds: StateFlow<Set<String>> = _downloadingIds.asStateFlow()
 
+    private val _downloadProgress = MutableStateFlow<Map<String, Float>>(emptyMap())
+    val downloadProgress: StateFlow<Map<String, Float>> = _downloadProgress.asStateFlow()
+
     // Now Playing Enrichments (Palette, Lyrics, RYD, Style)
     private val _palette = MutableStateFlow(AuraPalette())
     val palette: StateFlow<AuraPalette> = _palette.asStateFlow()
@@ -151,6 +155,15 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _nowPlayingStyle = MutableStateFlow(NowPlayingStyle.SPOTIFY)
     val nowPlayingStyle: StateFlow<NowPlayingStyle> = _nowPlayingStyle.asStateFlow()
+
+    val isVideoMode: StateFlow<Boolean> = AuraPlayerManager.isVideoMode
+    val isVideoLoading: StateFlow<Boolean> = AuraPlayerManager.isVideoLoading
+
+    private val _livePerformances = MutableStateFlow<List<AuraTrack>>(emptyList())
+    val livePerformances: StateFlow<List<AuraTrack>> = _livePerformances.asStateFlow()
+
+    private val _isLoadingLivePerformances = MutableStateFlow(false)
+    val isLoadingLivePerformances: StateFlow<Boolean> = _isLoadingLivePerformances.asStateFlow()
 
     // In-App Updates & Releases
     private val _currentUpdateRelease = MutableStateFlow<AuraReleaseInfo?>(null)
@@ -450,6 +463,7 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
     fun removeFromRecentlyPlayed(track: AuraTrack) {
         storage.removeRecentlyPlayed(track.videoId)
         _recentlyPlayed.value = storage.loadRecentlyPlayed()
+        Toast.makeText(getApplication(), "Removed '${track.title}' from recently played", Toast.LENGTH_SHORT).show()
     }
 
     fun setSearchFilter(filter: String) {
@@ -502,17 +516,101 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
         return _favorites.value.any { it.videoId == videoId }
     }
 
+    fun isTrackDownloaded(videoId: String): Boolean {
+        return _downloads.value.any { it.videoId == videoId && it.isDownloaded }
+    }
+
     fun downloadTrack(track: AuraTrack) {
         if (_downloadingIds.value.contains(track.videoId)) return
+        val isAlreadyDownloaded = _downloads.value.any {
+            it.videoId == track.videoId && it.isDownloaded && it.localFilePath?.let { p -> File(p).exists() } == true
+        }
+        if (isAlreadyDownloaded) {
+            Toast.makeText(getApplication(), "Already downloaded", Toast.LENGTH_SHORT).show()
+            return
+        }
+
         viewModelScope.launch {
+            // Immediate feedback: add placeholder to downloads list so it appears in "Downloaded" pill right away!
+            val placeholder = track.copy(isDownloaded = false)
+            val currentDownloads = _downloads.value.filterNot { it.videoId == track.videoId }
+            _downloads.value = listOf(placeholder) + currentDownloads
+
             _downloadingIds.value = _downloadingIds.value + track.videoId
-            val file = AuraPlayerManager.downloadTrackOffline(getApplication(), track)
+            _downloadProgress.value = _downloadProgress.value + (track.videoId to 0.02f)
+
+            // Cache lyrics and color palette for offline self-sufficiency in parallel
+            val lyricsJob = async {
+                try {
+                    SimpMusicLyricsRepository.getLyrics(
+                        videoId = track.videoId,
+                        title = track.title,
+                        artist = track.artist,
+                        durationSeconds = track.durationSeconds
+                    )?.let { storage.saveOfflineLyrics(track.videoId, it) }
+                } catch (e: Exception) {
+                    Log.w("AuraViewModel", "Failed to cache offline lyrics for ${track.videoId}: ${e.message}")
+                }
+            }
+
+            val paletteJob = async {
+                try {
+                    val pal = extractAuraPaletteFromUrl(track.highResArtworkUrl)
+                    storage.saveOfflinePalette(track.videoId, pal)
+                } catch (e: Exception) {
+                    Log.w("AuraViewModel", "Failed to cache offline palette for ${track.videoId}: ${e.message}")
+                }
+            }
+
+            val file = AuraPlayerManager.downloadTrackOffline(getApplication(), track) { _, _, progress ->
+                _downloadProgress.value = _downloadProgress.value + (track.videoId to progress)
+            }
+
+            lyricsJob.await()
+            paletteJob.await()
+
             _downloadingIds.value = _downloadingIds.value - track.videoId
-            if (file != null) {
+            _downloadProgress.value = _downloadProgress.value - track.videoId
+
+            if (file != null && file.exists() && file.length() > 10_000L) {
                 val downloadedTrack = track.copy(isDownloaded = true, localFilePath = file.absolutePath)
                 val updated = listOf(downloadedTrack) + _downloads.value.filterNot { it.videoId == track.videoId }
                 _downloads.value = updated
-                storage.saveDownloads(updated)
+                storage.saveDownloads(updated.filter { it.isDownloaded })
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(getApplication(), "Downloaded: ${track.title}", Toast.LENGTH_SHORT).show()
+                }
+            } else {
+                // If failed, remove placeholder
+                _downloads.value = _downloads.value.filterNot { it.videoId == track.videoId && !it.isDownloaded }
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(getApplication(), "Download failed for ${track.title}", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
+    fun removeDownload(track: AuraTrack) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                // 1. Delete by localFilePath
+                track.localFilePath?.let { p ->
+                    val f = File(p)
+                    if (f.exists()) f.delete()
+                }
+                // 2. Delete from dedicated folder
+                val dedicated = AuraPlayerManager.getOfflineFile(getApplication(), track.videoId)
+                if (dedicated.exists()) dedicated.delete()
+            } catch (e: Exception) {
+                Log.w("AuraViewModel", "Error deleting offline file: ${e.message}")
+            }
+
+            val updated = _downloads.value.filterNot { it.videoId == track.videoId }
+            _downloads.value = updated
+            storage.saveDownloads(updated.filter { it.isDownloaded })
+
+            withContext(Dispatchers.Main) {
+                Toast.makeText(getApplication(), "Removed '${track.title}' from downloads", Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -550,6 +648,42 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun createPlaylist(name: String, description: String = "", coverUrl: String = ""): AuraPlaylist {
+        val newPlaylist = AuraPlaylist(
+            id = "playlist_${System.currentTimeMillis()}",
+            name = name.ifBlank { "My Playlist" },
+            description = description,
+            coverUrl = coverUrl,
+            tracks = emptyList()
+        )
+        val updated = listOf(newPlaylist) + _playlists.value
+        _playlists.value = updated
+        storage.savePlaylists(updated)
+        Toast.makeText(getApplication(), "Created playlist: ${newPlaylist.name}", Toast.LENGTH_SHORT).show()
+        return newPlaylist
+    }
+
+    fun addTrackToPlaylist(playlistId: String, track: AuraTrack) {
+        val target = _playlists.value.firstOrNull { it.id == playlistId }
+        if (target == null) return
+
+        if (target.tracks.any { it.videoId == track.videoId }) {
+            Toast.makeText(getApplication(), "'${track.title}' is already in ${target.name}", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val updated = _playlists.value.map { pl ->
+            if (pl.id == playlistId) {
+                pl.copy(tracks = pl.tracks + track)
+            } else {
+                pl
+            }
+        }
+        _playlists.value = updated
+        storage.savePlaylists(updated)
+        Toast.makeText(getApplication(), "Added '${track.title}' to ${target.name}", Toast.LENGTH_SHORT).show()
+    }
+
     fun updatePlaylistCover(playlistId: String, newCoverUrl: String) {
         val updated = _playlists.value.map { pl ->
             if (pl.id == playlistId) pl.copy(coverUrl = newCoverUrl) else pl
@@ -567,21 +701,26 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun deletePlaylist(playlistId: String) {
+        val target = _playlists.value.firstOrNull { it.id == playlistId }
         val updated = _playlists.value.filterNot { it.id == playlistId }
         _playlists.value = updated
         storage.savePlaylists(updated)
+        Toast.makeText(getApplication(), "Deleted playlist: ${target?.name ?: "Playlist"}", Toast.LENGTH_SHORT).show()
     }
 
     fun removeTrackFromPlaylist(playlistId: String, videoId: String) {
-        val updated = _playlists.value.map { pl ->
-            if (pl.id == playlistId) {
-                pl.copy(tracks = pl.tracks.filterNot { it.videoId == videoId })
+        val pl = _playlists.value.firstOrNull { it.id == playlistId }
+        val track = pl?.tracks?.firstOrNull { it.videoId == videoId }
+        val updated = _playlists.value.map { p ->
+            if (p.id == playlistId) {
+                p.copy(tracks = p.tracks.filterNot { it.videoId == videoId })
             } else {
-                pl
+                p
             }
         }
         _playlists.value = updated
         storage.savePlaylists(updated)
+        Toast.makeText(getApplication(), "Removed '${track?.title ?: "song"}' from playlist", Toast.LENGTH_SHORT).show()
     }
 
     fun adjustLyricsOffset(deltaMs: Int) {
@@ -604,6 +743,64 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
         AuraPlayerManager.selectEqualizerPreset(preset)
     }
 
+    fun toggleVideoMode() {
+        if (AuraPlayerManager.isVideoMode.value) {
+            AuraPlayerManager.switchToAudioMode()
+            Toast.makeText(getApplication(), "Switched to Audio Mode", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val track = AuraPlayerManager.currentTrack.value
+        if (track == null) {
+            Toast.makeText(getApplication(), "No track currently playing", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        viewModelScope.launch {
+            AuraPlayerManager.setVideoLoading(true)
+            Toast.makeText(getApplication(), "Checking for Official Music Video…", Toast.LENGTH_SHORT).show()
+
+            val official = SimpMusicExtractorEngine.findOfficialMusicVideo(track)
+            AuraPlayerManager.setVideoLoading(false)
+
+            if (official != null) {
+                AuraPlayerManager.playVideoForTrack(official, track)
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(getApplication(), "Playing Official Video: ${official.title}", Toast.LENGTH_SHORT).show()
+                }
+            } else {
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(
+                        getApplication(),
+                        "No official music video available for this song",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+            }
+        }
+    }
+
+    fun setVideoMode(enabled: Boolean) {
+        AuraPlayerManager.setVideoMode(enabled)
+    }
+
+    fun loadLivePerformances(track: AuraTrack? = AuraPlayerManager.currentTrack.value) {
+        val target = track ?: return
+        viewModelScope.launch {
+            _isLoadingLivePerformances.value = true
+            _livePerformances.value = SimpMusicExtractorEngine.fetchLivePerformancesAndVideos(target)
+            _isLoadingLivePerformances.value = false
+        }
+    }
+
+    fun playLivePerformance(track: AuraTrack) {
+        AuraPlayerManager.setVideoMode(true)
+        val currentPos = AuraPlayerManager.exoPlayer?.currentPosition ?: 0L
+        AuraPlayerManager.playTrack(track, listOf(track))
+        AuraPlayerManager.exoPlayer?.seekTo(currentPos)
+        Toast.makeText(getApplication(), "Playing: ${track.title}", Toast.LENGTH_SHORT).show()
+    }
+
     fun checkForUpdates(force: Boolean = false) {
         viewModelScope.launch {
             val release = AuraUpdateManager.checkForUpdates(getApplication(), force)
@@ -616,7 +813,7 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
                 withContext(Dispatchers.Main) {
                     Toast.makeText(
                         getApplication(),
-                        "You're already on the latest version of AURA Music!",
+                        "You're already on the latest version of Aura!",
                         Toast.LENGTH_SHORT
                     ).show()
                 }
@@ -636,31 +833,25 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
      */
     fun triggerTestUpdateModal() {
         val testRelease = AuraReleaseInfo(
-            version = "1.3.0",
-            tagName = "v1.3.0",
-            releaseTitle = "Aura v1.3.0 • High-Definition Artwork & Full-Screen OTA",
+            version = "1.4.0",
+            tagName = "v1.4.0",
+            releaseTitle = "Aura v1.4.0 • HD Video Mode, Custom Playlists & Brand Identity",
             releaseNotes = """
-Aura v1.3 is a major release introducing the full-screen OTA update experience, real-time Firebase Cloud Messaging (FCM) delivery, Supabase subscription pooling, and crystal-clear 544px square artwork processing across YouTube Music InnerTube streams.
+Aura v1.4 is a major release introducing custom playlist creation, dynamic Spotify import toggling, universal "Add to Playlist" management, high-definition 1080p/720p adaptive video multiplexing with lossless audio, Spotify album art preservation in video mode, and our refined brand identity as "Aura" featuring the Obsidian Cyber Bunny mascot.
 
 ### What's Changed
-- High-Resolution Artwork: Replaced low-resolution 60px/120px thumbnails with crisp 544x544 square album art and 720p HD video thumbnails.
-- Firebase Cloud Messaging (FCM): Real-time push notification delivery for instant update broadcasts and new release drops.
-- Supabase Subscription Pooling: Decentralized device registration directly into Supabase PostgREST pool with installation UUIDs.
-- In-App Full-Screen Update Experience: Yomite-inspired full-screen release view with fluid parallax scroll, markdown changelog rendering, and direct APK download/install.
-- Settings Screen Diagnostic Hub: Added update check triggers, push notification status indicators, and live changelog previewer.
-
-### Key Features
-- Native 544x544 square retina album art resolution for all YouTube Music tracks.
-- High-definition 720p video cover fallbacks.
-- Spotify imported playlist artwork resolution parity.
-- Direct client-to-GitHub Releases engine bypasses external server dependencies.
-- Multi-threaded streaming APK download directly to app cache with real-time percentage indicators.
-- Native Android PackageInstaller invocation via secure FileProvider.
+- Custom Playlist Management: Create playlists directly with custom gallery cover art, title, and description.
+- Spotify Import Toggle: Interactive modal seamlessly switches header "+" to "X" with smooth curtain-down behavior.
+- Universal Add to Playlist: Add tracks to existing playlists from any track option sheet across Search, Library, and Player.
+- Adaptive 1080p/720p Video Mode: True HD video extraction paired with 160kbps audio via ExoPlayer MergingMediaSource.
+- Zero-Loss Track State: Switching between video and audio modes retains original Spotify high-res artwork, queue, and playback position.
+- Scoped Offline Storage: Dynamic download actions with real-time download progress tracking and scoped storage permission handling.
+- Rebranded to Aura: Clean new Obsidian Cyber Bunny logo, modernized vector splash screen, and streamlined app name across all screens.
             """.trimIndent(),
             downloadUrl = "https://github.com/jlfuertes14/Aura-Music/releases",
-            fileName = "aura-music-v1.3-universal.apk",
-            apkSize = 32_504_663L,
-            publishedAt = "2026-10-30T12:00:00Z",
+            fileName = "aura-music-v1.4-universal.apk",
+            apkSize = 34_820_000L,
+            publishedAt = "2026-11-02T12:00:00Z",
             htmlUrl = "https://github.com/jlfuertes14/Aura-Music/releases"
         )
         _currentUpdateRelease.value = testRelease

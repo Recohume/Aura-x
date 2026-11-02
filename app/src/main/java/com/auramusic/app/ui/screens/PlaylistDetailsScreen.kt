@@ -31,6 +31,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.DeleteOutline
+import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Image
 import androidx.compose.material.icons.rounded.MoreVert
@@ -38,16 +39,23 @@ import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.RestartAlt
 import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
+import com.auramusic.app.ui.components.AuraPlaylistCover
+import com.auramusic.app.ui.components.AuraAddToPlaylistModal
+import com.auramusic.app.ui.components.AuraCreatePlaylistModal
+import com.auramusic.app.ui.components.ForceWhiteSystemBarsEffect
+import com.auramusic.app.ui.components.TrackOptionRow
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -70,6 +78,7 @@ import com.auramusic.app.core.media.AuraPlayerManager
 import com.auramusic.app.domain.model.AuraPlaylist
 import com.auramusic.app.domain.model.AuraTrack
 import com.auramusic.app.ui.components.AuraPlaylistCover
+import com.auramusic.app.ui.components.AuraPlaylistOptionsModal
 import com.auramusic.app.ui.components.AuraTrackOptionsModal
 import com.auramusic.app.ui.theme.AuraPlayGreen
 import com.auramusic.app.ui.theme.SpotifyCard
@@ -81,26 +90,35 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PlaylistDetailsScreen(
     playlist: AuraPlaylist,
     favorites: List<AuraTrack>,
     downloads: List<AuraTrack>,
     downloadingIds: Set<String>,
+    downloadProgressMap: Map<String, Float> = emptyMap(),
     currentPlayingId: String?,
     isPlaying: Boolean,
     onBack: () -> Unit,
     onPlayTrack: (AuraTrack, List<AuraTrack>) -> Unit,
     onToggleFavorite: (AuraTrack) -> Unit,
     onDownloadTrack: (AuraTrack) -> Unit,
+    onRemoveDownload: ((AuraTrack) -> Unit)? = null,
+    onRemoveTrackFromPlaylist: ((videoId: String) -> Unit)? = null,
     onUpdateCover: (newCoverUrl: String) -> Unit,
     onUpdateTitle: (newTitle: String) -> Unit,
     onDeletePlaylist: () -> Unit,
+    playlists: List<AuraPlaylist> = emptyList(),
+    onAddTrackToPlaylist: (playlistId: String, track: AuraTrack) -> Unit = { _, _ -> },
+    onCreatePlaylist: (name: String, description: String, coverUrl: String) -> Unit = { _, _, _ -> },
     onOpenArtist: (String) -> Unit = {}
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     var selectedModalTrack by remember { mutableStateOf<AuraTrack?>(null) }
+    var trackForAddToPlaylist by remember { mutableStateOf<AuraTrack?>(null) }
+    var showCreatePlaylistModal by remember { mutableStateOf(false) }
     var showEditTitleDialog by remember { mutableStateOf(false) }
     var showMenu by remember { mutableStateOf(false) }
     var newTitleInput by remember { mutableStateOf(playlist.name) }
@@ -177,65 +195,12 @@ fun PlaylistDetailsScreen(
                     .padding(horizontal = 8.dp)
             )
 
-            Box {
-                IconButton(onClick = { showMenu = true }) {
-                    Icon(
-                        imageVector = Icons.Rounded.MoreVert,
-                        contentDescription = "Playlist Options",
-                        tint = TextPrimary
-                    )
-                }
-
-                DropdownMenu(
-                    expanded = showMenu,
-                    onDismissRequest = { showMenu = false },
-                    modifier = Modifier.background(SpotifyCard)
-                ) {
-                    DropdownMenuItem(
-                        text = { Text("Change Cover Art", color = TextPrimary) },
-                        leadingIcon = {
-                            Icon(Icons.Rounded.Image, contentDescription = null, tint = AuraPlayGreen)
-                        },
-                        onClick = {
-                            showMenu = false
-                            onPickCoverImage()
-                        }
-                    )
-                    if (playlist.coverUrl.isNotBlank()) {
-                        DropdownMenuItem(
-                            text = { Text("Reset to Spotify Collage", color = TextPrimary) },
-                            leadingIcon = {
-                                Icon(Icons.Rounded.RestartAlt, contentDescription = null, tint = TextSecondary)
-                            },
-                            onClick = {
-                                showMenu = false
-                                onUpdateCover("")
-                                Toast.makeText(context, "Cover reset to Spotify collage", Toast.LENGTH_SHORT).show()
-                            }
-                        )
-                    }
-                    DropdownMenuItem(
-                        text = { Text("Rename Playlist", color = TextPrimary) },
-                        leadingIcon = {
-                            Icon(Icons.Rounded.Edit, contentDescription = null, tint = TextPrimary)
-                        },
-                        onClick = {
-                            showMenu = false
-                            newTitleInput = playlist.name
-                            showEditTitleDialog = true
-                        }
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Delete Playlist", color = Color(0xFFFF5252)) },
-                        leadingIcon = {
-                            Icon(Icons.Rounded.DeleteOutline, contentDescription = null, tint = Color(0xFFFF5252))
-                        },
-                        onClick = {
-                            showMenu = false
-                            onDeletePlaylist()
-                        }
-                    )
-                }
+            IconButton(onClick = { showMenu = true }) {
+                Icon(
+                    imageVector = Icons.Rounded.MoreVert,
+                    contentDescription = "Playlist Options",
+                    tint = TextPrimary
+                )
             }
         }
 
@@ -397,8 +362,9 @@ fun PlaylistDetailsScreen(
                     track = track,
                     isCurrent = currentPlayingId == track.videoId,
                     isFavorite = favorites.any { it.videoId == track.videoId },
-                    isDownloaded = downloads.any { it.videoId == track.videoId },
+                    isDownloaded = downloads.any { it.videoId == track.videoId && it.isDownloaded },
                     isDownloading = downloadingIds.contains(track.videoId),
+                    downloadProgress = downloadProgressMap[track.videoId],
                     onClick = { onPlayTrack(track, playlist.tracks) },
                     onToggleFavorite = { onToggleFavorite(track) },
                     onDownload = { onDownloadTrack(track) },
@@ -450,6 +416,38 @@ fun PlaylistDetailsScreen(
         )
     }
 
+    if (showMenu) {
+        AuraPlaylistOptionsModal(
+            playlist = playlist,
+            onDismiss = { showMenu = false },
+            onDownloadAll = {
+                showMenu = false
+                playlist.tracks.forEach { onDownloadTrack(it) }
+                Toast.makeText(context, "Downloading ${playlist.tracks.size} songs for offline listening…", Toast.LENGTH_SHORT).show()
+            },
+            onChangeCover = {
+                showMenu = false
+                mediaPickerLauncher.launch("image/*")
+            },
+            onResetCover = if (playlist.coverUrl.isNotBlank()) {
+                {
+                    showMenu = false
+                    onUpdateCover("")
+                    Toast.makeText(context, "Cover reset to Spotify collage", Toast.LENGTH_SHORT).show()
+                }
+            } else null,
+            onRename = {
+                showMenu = false
+                newTitleInput = playlist.name
+                showEditTitleDialog = true
+            },
+            onDelete = {
+                showMenu = false
+                onDeletePlaylist()
+            }
+        )
+    }
+
     selectedModalTrack?.let { modalTrack ->
         AuraTrackOptionsModal(
             track = modalTrack,
@@ -473,12 +471,66 @@ fun PlaylistDetailsScreen(
                 selectedModalTrack = null
             },
             onAddToPlaylist = {
-                Toast.makeText(context, "Saved to library", Toast.LENGTH_SHORT).show()
+                val t = modalTrack
                 selectedModalTrack = null
+                trackForAddToPlaylist = t
             },
             onGoToArtist = {
                 selectedModalTrack = null
                 onOpenArtist(modalTrack.artist)
+            },
+            isDownloaded = downloads.any { it.videoId == modalTrack.videoId && it.isDownloaded },
+            onDownloadTrack = {
+                onDownloadTrack(modalTrack)
+                Toast.makeText(context, "Downloading ${modalTrack.title}…", Toast.LENGTH_SHORT).show()
+                selectedModalTrack = null
+            },
+            onRemoveDownload = onRemoveDownload?.let { cb ->
+                {
+                    cb(modalTrack)
+                    selectedModalTrack = null
+                }
+            },
+            onRemoveFromPlaylist = onRemoveTrackFromPlaylist?.let { cb ->
+                {
+                    cb(modalTrack.videoId)
+                    selectedModalTrack = null
+                }
+            },
+            onWatchVideo = {
+                selectedModalTrack = null
+                onPlayTrack(modalTrack, playlist.tracks)
+                com.auramusic.app.core.media.AuraPlayerManager.setVideoMode(true)
+            }
+        )
+    }
+
+    // Modal: Add Song to Playlist
+    trackForAddToPlaylist?.let { trackToAdd ->
+        AuraAddToPlaylistModal(
+            track = trackToAdd,
+            playlists = playlists,
+            onDismiss = { trackForAddToPlaylist = null },
+            onSelectPlaylist = { targetPl ->
+                onAddTrackToPlaylist(targetPl.id, trackToAdd)
+                trackForAddToPlaylist = null
+                Toast.makeText(context, "Added '${trackToAdd.title}' to '${targetPl.name}'", Toast.LENGTH_SHORT).show()
+            },
+            onCreateNewPlaylist = {
+                trackForAddToPlaylist = null
+                showCreatePlaylistModal = true
+            }
+        )
+    }
+
+    // Modal: Create Playlist on the fly
+    if (showCreatePlaylistModal) {
+        AuraCreatePlaylistModal(
+            onDismiss = { showCreatePlaylistModal = false },
+            onCreate = { title, desc, coverUri ->
+                showCreatePlaylistModal = false
+                onCreatePlaylist(title, desc, coverUri)
+                Toast.makeText(context, "Created playlist: $title", Toast.LENGTH_SHORT).show()
             }
         )
     }

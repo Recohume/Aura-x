@@ -12,9 +12,22 @@ import androidx.activity.enableEdgeToEdge
 import androidx.core.view.WindowCompat
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
 import com.auramusic.app.core.media.AuraMediaService
 import com.auramusic.app.core.notifications.AuraNotificationManager
 import com.auramusic.app.ui.AuraViewModel
+import com.auramusic.app.ui.components.AuraLaunchSplash
 import com.auramusic.app.ui.screens.AuraMainScreen
 import com.auramusic.app.ui.theme.AuraMusicTheme
 
@@ -67,7 +80,21 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             AuraMusicTheme {
-                AuraMainScreen(viewModel = auraViewModel)
+                var isSplashActive by rememberSaveable { mutableStateOf(true) }
+
+                Box(modifier = Modifier.fillMaxSize()) {
+                    AuraMainScreen(viewModel = auraViewModel)
+
+                    AnimatedVisibility(
+                        visible = isSplashActive,
+                        enter = fadeIn(),
+                        exit = fadeOut(tween(380, easing = FastOutSlowInEasing))
+                    ) {
+                        AuraLaunchSplash(
+                            onDismiss = { isSplashActive = false }
+                        )
+                    }
+                }
             }
         }
     }

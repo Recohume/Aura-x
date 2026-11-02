@@ -1,7 +1,10 @@
 package com.auramusic.app.ui.screens
 
+import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.tween
@@ -10,8 +13,10 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -33,8 +38,10 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.QueueMusic
+import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Clear
+import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.ContentPaste
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.DownloadDone
@@ -42,6 +49,7 @@ import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.Link
 import androidx.compose.material.icons.rounded.MoreHoriz
 import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -52,13 +60,19 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import com.auramusic.app.ui.components.AuraAddToPlaylistModal
+import com.auramusic.app.ui.components.AuraCreateOrImportModal
+import com.auramusic.app.ui.components.AuraCreatePlaylistModal
+import com.auramusic.app.ui.components.AuraPlaylistOptionsModal
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -97,6 +111,7 @@ fun LibraryScreen(
     playlists: List<AuraPlaylist>,
     stats: ListeningStats,
     downloadingIds: Set<String>,
+    downloadProgressMap: Map<String, Float> = emptyMap(),
     currentPlayingId: String? = null,
     isPlaying: Boolean = false,
     spotifyImportStatus: String? = null,
@@ -110,16 +125,38 @@ fun LibraryScreen(
     onPlayTrack: (AuraTrack, List<AuraTrack>) -> Unit,
     onToggleFavorite: (AuraTrack) -> Unit,
     onDownloadTrack: (AuraTrack) -> Unit,
+    onRemoveDownload: (AuraTrack) -> Unit = {},
     onUpdatePlaylistCover: (playlistId: String, newCoverUrl: String) -> Unit = { _, _ -> },
     onUpdatePlaylistTitle: (playlistId: String, newTitle: String) -> Unit = { _, _ -> },
     onDeletePlaylist: (playlistId: String) -> Unit = {},
+    onRemoveTrackFromPlaylist: (playlistId: String, videoId: String) -> Unit = { _, _ -> },
+    onCreatePlaylist: (name: String, description: String, coverUrl: String) -> Unit = { _, _, _ -> },
+    onAddTrackToPlaylist: (playlistId: String, track: AuraTrack) -> Unit = { _, _ -> },
     onOpenArtist: (String) -> Unit = {}
 ) {
     val context = LocalContext.current
+    var activeTab by rememberSaveable { mutableIntStateOf(0) }
     var selectedModalTrack by remember { mutableStateOf<AuraTrack?>(null) }
-    var selectedPlaylistId by remember { mutableStateOf<String?>(initialPlaylistId) }
+    var selectedPlaylistId by rememberSaveable { mutableStateOf<String?>(initialPlaylistId) }
+    var selectedPlaylistForOptions by remember { mutableStateOf<AuraPlaylist?>(null) }
+    var showCreateOrImportSheet by remember { mutableStateOf(false) }
+    var showCreatePlaylistModal by remember { mutableStateOf(false) }
+    var trackForAddToPlaylist by remember { mutableStateOf<AuraTrack?>(null) }
+    var showRenameDialog by remember { mutableStateOf(false) }
+    var renamePlaylistTarget by remember { mutableStateOf<AuraPlaylist?>(null) }
+    var renameInput by remember { mutableStateOf("") }
     var showImportCard by remember { mutableStateOf(false) }
     var linkInput by remember { mutableStateOf("") }
+
+    val mediaPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        val pl = selectedPlaylistForOptions
+        if (uri != null && pl != null) {
+            onUpdatePlaylistCover(pl.id, uri.toString())
+            Toast.makeText(context, "Cover updated", Toast.LENGTH_SHORT).show()
+        }
+    }
 
     LaunchedEffect(initialPlaylistId) {
         if (initialPlaylistId != null) {
@@ -158,6 +195,7 @@ fun LibraryScreen(
             favorites = favorites,
             downloads = downloads,
             downloadingIds = downloadingIds,
+            downloadProgressMap = downloadProgressMap,
             currentPlayingId = currentPlayingId,
             isPlaying = isPlaying,
             onBack = {
@@ -170,6 +208,8 @@ fun LibraryScreen(
             onPlayTrack = onPlayTrack,
             onToggleFavorite = onToggleFavorite,
             onDownloadTrack = onDownloadTrack,
+            onRemoveDownload = onRemoveDownload,
+            onRemoveTrackFromPlaylist = { vId -> onRemoveTrackFromPlaylist(selectedPlaylist.id, vId) },
             onUpdateCover = { newCover -> onUpdatePlaylistCover(selectedPlaylist.id, newCover) },
             onUpdateTitle = { newTitle -> onUpdatePlaylistTitle(selectedPlaylist.id, newTitle) },
             onDeletePlaylist = {
@@ -180,12 +220,14 @@ fun LibraryScreen(
                     onNavigateToHome()
                 }
             },
+            playlists = playlists,
+            onAddTrackToPlaylist = onAddTrackToPlaylist,
+            onCreatePlaylist = onCreatePlaylist,
             onOpenArtist = onOpenArtist
         )
         return
     }
 
-    var activeTab by remember { mutableIntStateOf(0) }
     val tabLabels = listOf("All", "Playlists", "Liked Songs", "Downloaded")
 
     Column(
@@ -211,13 +253,19 @@ fun LibraryScreen(
             )
 
             IconButton(
-                onClick = { showImportCard = !showImportCard },
+                onClick = {
+                    if (showImportCard) {
+                        showImportCard = false
+                    } else {
+                        showCreateOrImportSheet = true
+                    }
+                },
                 modifier = Modifier.size(36.dp)
             ) {
                 Icon(
-                    imageVector = Icons.Rounded.MoreHoriz,
-                    contentDescription = "Options",
-                    tint = if (showImportCard) AuraNeonLime else Color.White,
+                    imageVector = if (showImportCard) Icons.Rounded.Close else Icons.Rounded.Add,
+                    contentDescription = if (showImportCard) "Close Import" else "Create or Import Playlist",
+                    tint = Color.White,
                     modifier = Modifier.size(24.dp)
                 )
             }
@@ -435,13 +483,15 @@ fun LibraryScreen(
                     LazyColumn(contentPadding = PaddingValues(bottom = 140.dp)) {
                         items(allTracks, key = { it.videoId }) { track ->
                             val isFav = favorites.any { it.videoId == track.videoId }
-                            val isDown = downloads.any { it.videoId == track.videoId }
+                            val isDown = downloads.any { it.videoId == track.videoId && it.isDownloaded }
+                            val isDownProgress = downloadingIds.contains(track.videoId)
                             SpotifyTrackRowItem(
                                 track = track,
                                 isCurrent = currentPlayingId == track.videoId,
                                 isFavorite = isFav,
                                 isDownloaded = isDown,
-                                isDownloading = downloadingIds.contains(track.videoId),
+                                isDownloading = isDownProgress,
+                                downloadProgress = downloadProgressMap[track.videoId],
                                 onClick = { onPlayTrack(track, allTracks) },
                                 onToggleFavorite = { onToggleFavorite(track) },
                                 onDownload = { onDownloadTrack(track) },
@@ -460,11 +510,7 @@ fun LibraryScreen(
                             PlaylistItemRow(
                                 playlist = playlist,
                                 onClick = { selectedPlaylistId = playlist.id },
-                                onPlay = {
-                                    if (playlist.tracks.isNotEmpty()) {
-                                        onPlayTrack(playlist.tracks.first(), playlist.tracks)
-                                    }
-                                }
+                                onLongClick = { selectedPlaylistForOptions = playlist }
                             )
                         }
                     }
@@ -480,8 +526,9 @@ fun LibraryScreen(
                                 track = track,
                                 isCurrent = currentPlayingId == track.videoId,
                                 isFavorite = true,
-                                isDownloaded = downloads.any { it.videoId == track.videoId },
+                                isDownloaded = downloads.any { it.videoId == track.videoId && it.isDownloaded },
                                 isDownloading = downloadingIds.contains(track.videoId),
+                                downloadProgress = downloadProgressMap[track.videoId],
                                 onClick = { onPlayTrack(track, favorites) },
                                 onToggleFavorite = { onToggleFavorite(track) },
                                 onDownload = { onDownloadTrack(track) },
@@ -497,15 +544,18 @@ fun LibraryScreen(
                 } else {
                     LazyColumn(contentPadding = PaddingValues(bottom = 140.dp)) {
                         items(downloads, key = { it.videoId }) { track ->
+                            val isDown = track.isDownloaded
+                            val isDownProgress = downloadingIds.contains(track.videoId)
                             SpotifyTrackRowItem(
                                 track = track,
                                 isCurrent = currentPlayingId == track.videoId,
                                 isFavorite = favorites.any { it.videoId == track.videoId },
-                                isDownloaded = true,
-                                isDownloading = false,
+                                isDownloaded = isDown,
+                                isDownloading = isDownProgress,
+                                downloadProgress = downloadProgressMap[track.videoId],
                                 onClick = { onPlayTrack(track, downloads) },
                                 onToggleFavorite = { onToggleFavorite(track) },
-                                onDownload = { },
+                                onDownload = { onDownloadTrack(track) },
                                 onOptionsClick = { selectedModalTrack = track }
                             )
                         }
@@ -538,27 +588,167 @@ fun LibraryScreen(
                 selectedModalTrack = null
             },
             onAddToPlaylist = {
-                Toast.makeText(context, "Saved to library", Toast.LENGTH_SHORT).show()
+                val t = modalTrack
                 selectedModalTrack = null
+                trackForAddToPlaylist = t
             },
             onGoToArtist = {
                 selectedModalTrack = null
                 onOpenArtist(modalTrack.artist)
+            },
+            isDownloaded = downloads.any { it.videoId == modalTrack.videoId && it.isDownloaded },
+            onDownloadTrack = {
+                onDownloadTrack(modalTrack)
+                Toast.makeText(context, "Downloading ${modalTrack.title}…", Toast.LENGTH_SHORT).show()
+                selectedModalTrack = null
+            },
+            onRemoveDownload = {
+                onRemoveDownload(modalTrack)
+                selectedModalTrack = null
+            },
+            onWatchVideo = {
+                selectedModalTrack = null
+                onPlayTrack(modalTrack, listOf(modalTrack))
+                com.auramusic.app.core.media.AuraPlayerManager.setVideoMode(true)
+            }
+        )
+    }
+
+    selectedPlaylistForOptions?.let { pl ->
+        AuraPlaylistOptionsModal(
+            playlist = pl,
+            onDismiss = { selectedPlaylistForOptions = null },
+            onDownloadAll = {
+                selectedPlaylistForOptions = null
+                pl.tracks.forEach { onDownloadTrack(it) }
+                Toast.makeText(context, "Downloading ${pl.tracks.size} songs for offline listening…", Toast.LENGTH_SHORT).show()
+            },
+            onChangeCover = {
+                selectedPlaylistForOptions = null
+                mediaPickerLauncher.launch("image/*")
+            },
+            onResetCover = if (pl.coverUrl.isNotBlank()) {
+                {
+                    selectedPlaylistForOptions = null
+                    onUpdatePlaylistCover(pl.id, "")
+                    Toast.makeText(context, "Cover reset to Spotify collage", Toast.LENGTH_SHORT).show()
+                }
+            } else null,
+            onRename = {
+                selectedPlaylistForOptions = null
+                renamePlaylistTarget = pl
+                renameInput = pl.name
+                showRenameDialog = true
+            },
+            onDelete = {
+                selectedPlaylistForOptions = null
+                onDeletePlaylist(pl.id)
+            }
+        )
+    }
+
+    if (showRenameDialog && renamePlaylistTarget != null) {
+        val target = renamePlaylistTarget!!
+        AlertDialog(
+            onDismissRequest = { showRenameDialog = false },
+            containerColor = Color(0xFF1B1D26),
+            title = { Text("Rename Playlist", color = Color.White, fontWeight = FontWeight.Bold) },
+            text = {
+                OutlinedTextField(
+                    value = renameInput,
+                    onValueChange = { renameInput = it },
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = AuraNeonLime,
+                        unfocusedBorderColor = Color.White.copy(alpha = 0.2f),
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White
+                    )
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val trimmed = renameInput.trim()
+                        if (trimmed.isNotBlank()) {
+                            onUpdatePlaylistTitle(target.id, trimmed)
+                            Toast.makeText(context, "Renamed to '$trimmed'", Toast.LENGTH_SHORT).show()
+                        }
+                        showRenameDialog = false
+                    }
+                ) {
+                    Text("Save", color = AuraNeonLime, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showRenameDialog = false }) {
+                    Text("Cancel", color = Color.White.copy(alpha = 0.6f))
+                }
+            }
+        )
+    }
+
+    // Modal 1: Choice between "Create a playlist" and "Import Playlist from Spotify"
+    if (showCreateOrImportSheet) {
+        AuraCreateOrImportModal(
+            onDismiss = { showCreateOrImportSheet = false },
+            onCreatePlaylist = {
+                showCreateOrImportSheet = false
+                showCreatePlaylistModal = true
+            },
+            onImportSpotify = {
+                showCreateOrImportSheet = false
+                showImportCard = true
+            }
+        )
+    }
+
+    // Modal 2: Create Playlist with Cover Image, Title, Description
+    if (showCreatePlaylistModal) {
+        AuraCreatePlaylistModal(
+            onDismiss = { showCreatePlaylistModal = false },
+            onCreate = { title, desc, coverUri ->
+                showCreatePlaylistModal = false
+                onCreatePlaylist(title, desc, coverUri)
+                activeTab = 1
+                Toast.makeText(context, "Created playlist: $title", Toast.LENGTH_SHORT).show()
+            }
+        )
+    }
+
+    // Modal 3: Add Song to Playlist
+    trackForAddToPlaylist?.let { trackToAdd ->
+        AuraAddToPlaylistModal(
+            track = trackToAdd,
+            playlists = playlists,
+            onDismiss = { trackForAddToPlaylist = null },
+            onSelectPlaylist = { targetPl ->
+                onAddTrackToPlaylist(targetPl.id, trackToAdd)
+                trackForAddToPlaylist = null
+                Toast.makeText(context, "Added '${trackToAdd.title}' to '${targetPl.name}'", Toast.LENGTH_SHORT).show()
+            },
+            onCreateNewPlaylist = {
+                trackForAddToPlaylist = null
+                showCreatePlaylistModal = true
             }
         )
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun PlaylistItemRow(
     playlist: AuraPlaylist,
     onClick: () -> Unit,
-    onPlay: () -> Unit
+    onLongClick: () -> Unit
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = onLongClick
+            )
             .padding(horizontal = 20.dp, vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -585,24 +775,6 @@ private fun PlaylistItemRow(
                 text = "Playlist • ${playlist.tracks.size} songs",
                 style = MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp),
                 color = TextSecondary
-            )
-        }
-
-        Spacer(modifier = Modifier.width(8.dp))
-
-        Box(
-            modifier = Modifier
-                .size(38.dp)
-                .clip(CircleShape)
-                .background(AuraCircleButtonBg)
-                .clickable(onClick = onPlay),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                imageVector = Icons.Rounded.PlayArrow,
-                contentDescription = "Play Playlist",
-                tint = Color.White,
-                modifier = Modifier.size(18.dp)
             )
         }
     }

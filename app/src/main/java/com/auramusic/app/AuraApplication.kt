@@ -28,7 +28,7 @@ class AuraApplication : Application() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "Aura Music Playback",
+                "Aura Playback",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
                 description = "Shows now playing music notification with controls"
