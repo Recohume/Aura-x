@@ -5,6 +5,7 @@ import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
@@ -213,8 +214,8 @@ fun AuraUpdateModal(
                 Spacer(modifier = Modifier.height(8.dp))
 
                 // Version Diff Text Row (matching Yomite minimal inline design: no pill border/background)
-                val cleanCurrent = currentVersion.trim().removePrefix("v").removePrefix("V").ifBlank { "1.3" }
-                val cleanRemote = release.version.trim().removePrefix("v").removePrefix("V").ifBlank { "1.4" }
+                val cleanCurrent = currentVersion.trim().removePrefix("v").removePrefix("V").ifBlank { "1.4" }
+                val cleanRemote = release.version.trim().removePrefix("v").removePrefix("V").ifBlank { "1.4.1" }
 
                 Row(
                     modifier = Modifier.padding(top = 6.dp),
@@ -297,15 +298,6 @@ fun AuraUpdateModal(
                             fontWeight = FontWeight.Bold,
                             color = Color(0xFF7A7D87),
                             letterSpacing = 1.2.sp
-                        )
-
-                        Spacer(modifier = Modifier.height(12.dp))
-
-                        Text(
-                            text = release.releaseTitle.ifBlank { "Aura v${release.version}" },
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White
                         )
 
                         Spacer(modifier = Modifier.height(10.dp))
@@ -411,11 +403,12 @@ fun AuraUpdateModal(
                             // Single rounded border container with two-toned progress animation fill
                             val animatedProgress by animateFloatAsState(
                                 targetValue = downloadProgress.fraction.coerceIn(0f, 1f),
-                                animationSpec = spring(stiffness = Spring.StiffnessLow),
+                                animationSpec = tween(durationMillis = 200, easing = LinearOutSlowInEasing),
                                 label = "DownloadProgressFill"
                             )
 
-                            val percent = (animatedProgress * 100).toInt()
+                            val clampedProgress = animatedProgress.coerceIn(0f, 1f)
+                            val percent = (clampedProgress * 100).toInt()
                             val downloadedMb = downloadProgress.writtenBytes / (1024f * 1024f)
                             val totalMb = downloadProgress.totalBytes / (1024f * 1024f)
                             val progressLabel = if (totalMb > 0f) {
@@ -433,13 +426,17 @@ fun AuraUpdateModal(
                                 contentAlignment = Alignment.CenterStart
                             ) {
                                 // Two-toned fill progress layer
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxHeight()
-                                        .fillMaxWidth(fraction = animatedProgress)
-                                        .clip(RoundedCornerShape(percent = 50))
-                                        .background(AuraLime)
-                                )
+                                // Note: Outer container is already clipped to percent = 50 (capsule pill).
+                                // We do NOT apply a secondary RoundedCornerShape(percent = 50) on this inner box,
+                                // preventing IllegalArgumentException if width is near zero or fractional.
+                                if (clampedProgress > 0.001f) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxHeight()
+                                            .fillMaxWidth(fraction = clampedProgress)
+                                            .background(AuraLime)
+                                    )
+                                }
 
                                 // Centered label with progress text
                                 Row(
@@ -451,7 +448,7 @@ fun AuraUpdateModal(
                                         text = progressLabel,
                                         fontSize = 14.sp,
                                         fontWeight = FontWeight.ExtraBold,
-                                        color = if (animatedProgress > 0.45f) DarkButtonText else Color.White
+                                        color = if (clampedProgress > 0.45f) DarkButtonText else Color.White
                                     )
                                 }
                             }

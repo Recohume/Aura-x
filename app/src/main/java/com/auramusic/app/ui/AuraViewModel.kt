@@ -833,23 +833,32 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
      */
     fun triggerTestUpdateModal() {
         val testRelease = AuraReleaseInfo(
-            version = "1.4.0",
-            tagName = "v1.4.0",
-            releaseTitle = "Aura v1.4.0 • HD Video Mode, Custom Playlists & Brand Identity",
+            version = "1.4.1",
+            tagName = "v1.4.1",
+            releaseTitle = "Aura v1.4.1 • In-App Update Stability & Minor Fixes",
             releaseNotes = """
-Aura v1.4 is a major release introducing custom playlist creation, dynamic Spotify import toggling, universal "Add to Playlist" management, high-definition 1080p/720p adaptive video multiplexing with lossless audio, Spotify album art preservation in video mode, and our refined brand identity as "Aura" featuring the Obsidian Cyber Bunny mascot.
+# Aura v1.4.1
 
-### What's Changed
-- Custom Playlist Management: Create playlists directly with custom gallery cover art, title, and description.
-- Spotify Import Toggle: Interactive modal seamlessly switches header "+" to "X" with smooth curtain-down behavior.
-- Universal Add to Playlist: Add tracks to existing playlists from any track option sheet across Search, Library, and Player.
-- Adaptive 1080p/720p Video Mode: True HD video extraction paired with 160kbps audio via ExoPlayer MergingMediaSource.
-- Zero-Loss Track State: Switching between video and audio modes retains original Spotify high-res artwork, queue, and playback position.
-- Scoped Offline Storage: Dynamic download actions with real-time download progress tracking and scoped storage permission handling.
-- Rebranded to Aura: Clean new Obsidian Cyber Bunny logo, modernized vector splash screen, and streamlined app name across all screens.
+Release Tags: [release, v1.4.1, android, kotlin, jetpack-compose, in-app-update, bugfix]
+
+---
+
+## Overview
+
+Aura v1.4.1 is a stability release addressing the direct in-app update installation engine, eliminating corner calculation exceptions during download animations, and polishing the release notes changelog layout.
+
+---
+
+## What's Changed
+
+- **In-App OTA Update Engine Stability**:
+  - Resolved `IllegalArgumentException` (negative corner size in px) caused by spring animation undershoot during APK download progress fill.
+  - Replaced spring spec with monotonic `LinearOutSlowInEasing` tween animation and clamped progress strictly in `0f..1f`.
+  - Removed redundant nested capsule clips on the progress fill layer, preventing geometry computation issues on fractional widths.
+  - Eliminated duplicate version header in the update changelog modal.
             """.trimIndent(),
             downloadUrl = "https://github.com/jlfuertes14/Aura-Music/releases",
-            fileName = "aura-music-v1.4-universal.apk",
+            fileName = "aura-music-v1.4.1-universal.apk",
             apkSize = 34_820_000L,
             publishedAt = "2026-11-02T12:00:00Z",
             htmlUrl = "https://github.com/jlfuertes14/Aura-Music/releases"
