@@ -833,34 +833,36 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
      */
     fun triggerTestUpdateModal() {
         val testRelease = AuraReleaseInfo(
-            version = "1.4.3",
-            tagName = "v1.4.3",
-            releaseTitle = "Aura v1.4.3 • Flatter Mascot, Search & Video Engine Enhancements",
+            version = "1.4.4",
+            tagName = "v1.4.4",
+            releaseTitle = "Aura v1.4.4 • Permanent Signing Keystore & Notification Mascot Polish",
             releaseNotes = """
-# Aura v1.4.3
+# Aura v1.4.4
 
-Release Tags: [release, v1.4.3, android, kotlin, jetpack-compose, in-app-update, bugfix, ui-polish]
+Release Tags: [release, v1.4.4, android, kotlin, jetpack-compose, in-app-update, keystore, notifications, ui-polish]
 
 ---
 
 ## Overview
 
-Aura v1.4.3 introduces a flat borderless mascot logo in the update modal, fixes duplicate changelog headers, enhances official music video discovery, adds mascot icons to push notifications, streamlines player options, and revamps the playlist creation sheet.
+Aura v1.4.4 establishes a permanent repository release keystore to eliminate package conflict installation errors on Android, refines notification icons with a custom monochrome mascot silhouette, and standardizes in-app update delivery.
 
 ---
 
 ## What's Changed
 
-- **Flat Mascot Logo**: Removed circular outline and enlarged the mascot to 112dp.
-- **Deduplicated Changelog**: Suppressed redundant version headers in release notes.
-- **Accurate Official Video Search**: Re-indexed search query to prioritize exact music videos.
-- **Push Notification Mascot Icon**: Shows the Aura mascot as a large notification icon.
-- **Full-Screen Player Cleanup**: Streamlined 3-dot options menu.
-- **Create Playlist Modal**: Modern borderless fields with horizontal cover image layout.
-- **Search Header**: Removed the follow button from artist search results.
+- **Permanent Release Signing Keystore**:
+  - Committed official permanent release keystore to guarantee uniform cryptographic signatures across all GitHub Actions builds.
+  - Fixes `App not installed as package conflicts with an existing package` (`INSTALL_FAILED_UPDATE_INCOMPATIBLE`) when updating the app directly.
+- **Monochrome Mascot Notification Icon**:
+  - Replaced the circular launcher stencil with a custom vector silhouette of the Aura bunny mascot with headphones (`ic_aura_notification.xml`).
+  - Correctly fills the notification badge circle and status bar with the Aura mascot.
+- **Notification Layout Polish**:
+  - Retained the high-resolution mascot thumbnail on the right-side of the notification card via `setLargeIcon`.
+  - Removed full-bleed `BigPicture` expansion so notifications remain compact and clean when the notification dropdown is opened.
             """.trimIndent(),
             downloadUrl = "https://github.com/jlfuertes14/Aura-Music/releases",
-            fileName = "aura-music-v1.4.3-universal.apk",
+            fileName = "aura-music-v1.4.4-universal.apk",
             apkSize = 34_820_000L,
             publishedAt = "2026-11-02T12:00:00Z",
             htmlUrl = "https://github.com/jlfuertes14/Aura-Music/releases"

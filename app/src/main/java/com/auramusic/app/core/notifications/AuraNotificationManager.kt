@@ -159,8 +159,8 @@ object AuraNotificationManager {
         try {
             val deviceId = getOrCreateDeviceId(context)
             val appVersion = try {
-                context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "1.4.3"
-            } catch (_: Exception) { "1.4.3" }
+                context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "1.4.4"
+            } catch (_: Exception) { "1.4.4" }
 
             val payload = JSONObject().apply {
                 put("device_id", deviceId)
@@ -233,7 +233,7 @@ object AuraNotificationManager {
         }
 
         val notification = NotificationCompat.Builder(context, CHANNEL_UPDATES_ID)
-            .setSmallIcon(R.mipmap.ic_launcher)
+            .setSmallIcon(R.drawable.ic_aura_notification)
             .apply {
                 if (mascotBitmap != null) {
                     setLargeIcon(mascotBitmap)

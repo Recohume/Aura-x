@@ -60,7 +60,7 @@ jobs:
         run: |
           RAW_VERSION=$(grep -o 'versionName = "[^"]*"' app/build.gradle.kts | cut -d'"' -f2 || true)
           if [ -z "$RAW_VERSION" ]; then
-            RAW_VERSION="1.4.3"
+            RAW_VERSION="1.4.4"
           fi
           if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
             TAG_VERSION="${GITHUB_REF#refs/tags/}"
@@ -93,7 +93,14 @@ jobs:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
-          if [ -n "$KEYSTORE_BASE64" ]; then
+          if [ -f "keystore/release.keystore" ]; then
+            echo "Using committed permanent repository release keystore..."
+            cp keystore/release.keystore release.jks
+            echo "KEYSTORE_FILE=release.jks" >> $GITHUB_ENV
+            echo "KEY_ALIAS=auramusic" >> $GITHUB_ENV
+            echo "KEYSTORE_PASS=aurarelease2026" >> $GITHUB_ENV
+            echo "KEY_PASS=aurarelease2026" >> $GITHUB_ENV
+          elif [ -n "$KEYSTORE_BASE64" ]; then
             echo "Using repository signing secret..."
             echo "$KEYSTORE_BASE64" | base64 -d > release.jks
             echo "KEYSTORE_FILE=release.jks" >> $GITHUB_ENV
