@@ -82,9 +82,11 @@ fun PlaylistDetailScreen(
     playlistDetail: PlaylistDetail,
     isLoading: Boolean,
     currentPlayingId: String?,
+    isSaved: Boolean = false,
     onClose: () -> Unit,
     onPlayTrack: (AuraTrack, List<AuraTrack>) -> Unit,
-    onToggleFavorite: (AuraTrack) -> Unit
+    onToggleFavorite: (AuraTrack) -> Unit,
+    onToggleSave: () -> Unit = {}
 ) {
     val context = LocalContext.current
     var selectedModalTrack by remember { mutableStateOf<AuraTrack?>(null) }
@@ -232,11 +234,31 @@ fun PlaylistDetailScreen(
                         )
                     }
 
-                    if (allTracks.isNotEmpty()) {
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                            verticalAlignment = Alignment.CenterVertically
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // Like / Save Playlist Button
+                        Surface(
+                            shape = CircleShape,
+                            color = if (isSaved) AuraNeonLime.copy(alpha = 0.15f) else Color(0xFF1E2028),
+                            border = BorderStroke(1.dp, if (isSaved) AuraNeonLime else Color(0xFF2E323D)),
+                            modifier = Modifier
+                                .size(42.dp)
+                                .clip(CircleShape)
+                                .clickable { onToggleSave() }
                         ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = if (isSaved) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
+                                    contentDescription = if (isSaved) "Remove from Library" else "Save to Library",
+                                    tint = if (isSaved) AuraNeonLime else Color.White,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
+
+                        if (allTracks.isNotEmpty()) {
                             // Shuffle Button
                             Surface(
                                 shape = CircleShape,

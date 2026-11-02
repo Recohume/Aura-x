@@ -57,6 +57,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -162,12 +163,14 @@ fun AuraUpdateModal(
                     },
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                // Flat, enlarged Mascot Logo without circular outline/badge
+                // Circled App Icon from assets/icon.png
                 Image(
-                    painter = painterResource(id = R.drawable.aura_bunny_mascot),
+                    painter = painterResource(id = R.drawable.aura_logo),
                     contentDescription = "Aura Mascot",
+                    contentScale = ContentScale.Crop,
                     modifier = Modifier
-                        .size(112.dp)
+                        .size(104.dp)
+                        .clip(CircleShape)
                 )
 
                 Spacer(modifier = Modifier.height(10.dp))
@@ -204,8 +207,8 @@ fun AuraUpdateModal(
                 Spacer(modifier = Modifier.height(8.dp))
 
                 // Version Diff Text Row (matching Yomite minimal inline design: no pill border/background)
-                val cleanCurrent = currentVersion.trim().removePrefix("v").removePrefix("V").ifBlank { "1.4.4" }
-                val cleanRemote = release.version.trim().removePrefix("v").removePrefix("V").ifBlank { "1.4.5" }
+                val cleanCurrent = currentVersion.trim().removePrefix("v").removePrefix("V").ifBlank { "1.4.5" }
+                val cleanRemote = release.version.trim().removePrefix("v").removePrefix("V").ifBlank { "1.4.6" }
 
                 Row(
                     modifier = Modifier.padding(top = 6.dp),
@@ -414,7 +417,7 @@ fun AuraUpdateModal(
                                     .fillMaxWidth()
                                     .height(52.dp)
                                     .clip(RoundedCornerShape(percent = 50))
-                                    .background(Color(0xFF161820)),
+                                    .background(LightButtonBg),
                                 contentAlignment = Alignment.CenterStart
                             ) {
                                 // Two-toned fill progress layer
@@ -430,7 +433,7 @@ fun AuraUpdateModal(
                                     )
                                 }
 
-                                // Centered label with progress text
+                                // Centered label with progress text - color black not white
                                 Row(
                                     modifier = Modifier.fillMaxSize(),
                                     horizontalArrangement = Arrangement.Center,
@@ -438,9 +441,9 @@ fun AuraUpdateModal(
                                 ) {
                                     Text(
                                         text = progressLabel,
-                                        fontSize = 14.sp,
-                                        fontWeight = FontWeight.ExtraBold,
-                                        color = if (clampedProgress > 0.45f) DarkButtonText else Color.White
+                                        fontSize = 14.5.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color.Black
                                     )
                                 }
                             }

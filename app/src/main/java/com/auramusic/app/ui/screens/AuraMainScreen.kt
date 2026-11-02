@@ -306,7 +306,9 @@ fun AuraMainScreen(viewModel: AuraViewModel) {
                     onCreatePlaylist = { name, desc, cover -> viewModel.createPlaylist(name, desc, cover) },
                     onRemoveRecentlyPlayed = { viewModel.removeFromRecentlyPlayed(it) },
                     onOpenArtist = { artistName, songTitle -> viewModel.openArtistByName(artistName, songTitle) },
-                    onOpenCommunityPlaylist = { viewModel.openPlaylistDetail(it) }
+                    onOpenCommunityPlaylist = { viewModel.openPlaylistDetail(it) },
+                    onPlayCommunityPlaylist = { viewModel.playCommunityPlaylist(it) },
+                    onToggleSaveCommunityPlaylist = { viewModel.toggleSaveCommunityPlaylist(it) }
                 )
                 2 -> LibraryScreen(
                     favorites = favorites,
@@ -389,9 +391,11 @@ fun AuraMainScreen(viewModel: AuraViewModel) {
                     playlistDetail = detail,
                     isLoading = isPlaylistLoading,
                     currentPlayingId = currentTrack?.videoId,
+                    isSaved = viewModel.isPlaylistSaved(detail.id),
                     onClose = { viewModel.closePlaylistDetail() },
                     onPlayTrack = { track, queue -> viewModel.playTrack(track, queue) },
-                    onToggleFavorite = { viewModel.toggleFavorite(it) }
+                    onToggleFavorite = { viewModel.toggleFavorite(it) },
+                    onToggleSave = { viewModel.toggleSavePlaylistDetail(detail) }
                 )
             }
         }

@@ -11,6 +11,8 @@ import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Path
+import android.graphics.PorterDuff
+import android.graphics.PorterDuffXfermode
 import android.os.Build
 import android.util.Log
 import androidx.core.app.NotificationCompat
@@ -163,8 +165,8 @@ object AuraNotificationManager {
         try {
             val deviceId = getOrCreateDeviceId(context)
             val appVersion = try {
-                context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "1.4.5"
-            } catch (_: Exception) { "1.4.5" }
+                context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "1.4.6"
+            } catch (_: Exception) { "1.4.6" }
 
             val payload = JSONObject().apply {
                 put("device_id", deviceId)
@@ -257,23 +259,20 @@ object AuraNotificationManager {
     }
 
     /**
-     * Renders R.drawable.aura_logo into a crisp anti-aliased circular Bitmap
+     * Renders R.drawable.aura_logo (assets/icon.png) into a crisp anti-aliased circular Bitmap
      * for the right-side notification thumbnail (setLargeIcon) without BigPicture expansion.
      */
     private fun createCircularLogoBitmap(context: Context): Bitmap? {
         return try {
-            val raw = BitmapFactory.decodeResource(context.resources, R.drawable.aura_logo)
-                ?: BitmapFactory.decodeResource(context.resources, R.drawable.aura_bunny_mascot)
-                ?: return null
-            val size = 192
+            val raw = BitmapFactory.decodeResource(context.resources, R.drawable.aura_logo) ?: return null
+            val size = 256
             val scaled = Bitmap.createScaledBitmap(raw, size, size, true)
             val output = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
             val canvas = Canvas(output)
             val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
-            val path = Path().apply {
-                addCircle(size / 2f, size / 2f, size / 2f, Path.Direction.CW)
-            }
-            canvas.clipPath(path)
+            val radius = size / 2f
+            canvas.drawCircle(radius, radius, radius, paint)
+            paint.xfermode = PorterDuffXfermode(PorterDuff.Mode.SRC_IN)
             canvas.drawBitmap(scaled, 0f, 0f, paint)
             output
         } catch (_: Exception) {

@@ -740,6 +740,92 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
         Toast.makeText(getApplication(), "Removed '${track?.title ?: "song"}' from playlist", Toast.LENGTH_SHORT).show()
     }
 
+    fun isPlaylistSaved(playlistId: String): Boolean {
+        val cleanId = playlistId.removePrefix("VL").removePrefix("ytm_")
+        return _playlists.value.any { pl ->
+            pl.id == playlistId ||
+            pl.id == "ytm_$playlistId" ||
+            pl.id.removePrefix("VL").removePrefix("ytm_") == cleanId
+        }
+    }
+
+    fun toggleSaveCommunityPlaylist(playlist: YtmCommunityPlaylist) {
+        val cleanId = playlist.id.removePrefix("VL").removePrefix("ytm_")
+        val existing = _playlists.value.firstOrNull { pl ->
+            pl.id == playlist.id ||
+            pl.id == "ytm_${playlist.id}" ||
+            pl.id.removePrefix("VL").removePrefix("ytm_") == cleanId
+        }
+
+        if (existing != null) {
+            val updated = _playlists.value.filterNot { it.id == existing.id }
+            _playlists.value = updated
+            storage.savePlaylists(updated)
+            Toast.makeText(getApplication(), "Removed '${playlist.title}' from Library", Toast.LENGTH_SHORT).show()
+        } else {
+            val targetId = if (playlist.id.startsWith("VL") || playlist.id.startsWith("PL") || playlist.id.startsWith("RD")) playlist.id else "ytm_${playlist.id}"
+            val newPlaylist = AuraPlaylist(
+                id = targetId,
+                name = playlist.title,
+                description = if (playlist.author.isNotBlank()) "Curated by ${playlist.author}" else "Saved playlist",
+                coverUrl = playlist.highResArtworkUrl,
+                tracks = emptyList()
+            )
+            val updated = listOf(newPlaylist) + _playlists.value
+            _playlists.value = updated
+            storage.savePlaylists(updated)
+            Toast.makeText(getApplication(), "Saved '${playlist.title}' to Library", Toast.LENGTH_SHORT).show()
+
+            // Asynchronously fetch and populate tracks
+            viewModelScope.launch {
+                try {
+                    val tracks = SimpMusicExtractorEngine.fetchPlaylistTracks(playlist.id)
+                    if (tracks.isNotEmpty()) {
+                        val populated = _playlists.value.map { pl ->
+                            if (pl.id == newPlaylist.id) {
+                                pl.copy(tracks = tracks.map { it.copy(album = playlist.title) })
+                            } else pl
+                        }
+                        _playlists.value = populated
+                        storage.savePlaylists(populated)
+                    }
+                } catch (e: Exception) {
+                    Log.w("AuraViewModel", "Error populating saved playlist tracks: ${e.message}")
+                }
+            }
+        }
+    }
+
+    fun toggleSavePlaylistDetail(detail: PlaylistDetail) {
+        val cleanId = detail.id.removePrefix("VL").removePrefix("ytm_")
+        val existing = _playlists.value.firstOrNull { pl ->
+            pl.id == detail.id ||
+            pl.id == "ytm_${detail.id}" ||
+            pl.id.removePrefix("VL").removePrefix("ytm_") == cleanId
+        }
+
+        if (existing != null) {
+            val updated = _playlists.value.filterNot { it.id == existing.id }
+            _playlists.value = updated
+            storage.savePlaylists(updated)
+            Toast.makeText(getApplication(), "Removed '${detail.title}' from Library", Toast.LENGTH_SHORT).show()
+        } else {
+            val targetId = if (detail.id.startsWith("VL") || detail.id.startsWith("PL") || detail.id.startsWith("RD")) detail.id else "ytm_${detail.id}"
+            val tracks = detail.tracks.map { it.track.copy(album = detail.title) }
+            val newPlaylist = AuraPlaylist(
+                id = targetId,
+                name = detail.title,
+                description = if (detail.author.isNotBlank()) "Curated by ${detail.author}" else "Saved playlist",
+                coverUrl = detail.bannerUrl,
+                tracks = tracks
+            )
+            val updated = listOf(newPlaylist) + _playlists.value
+            _playlists.value = updated
+            storage.savePlaylists(updated)
+            Toast.makeText(getApplication(), "Saved '${detail.title}' to Library", Toast.LENGTH_SHORT).show()
+        }
+    }
+
     fun adjustLyricsOffset(deltaMs: Int) {
         val vid = AuraPlayerManager.currentTrack.value?.videoId ?: return
         val next = (_lyricsOffsetMs.value + deltaMs).coerceIn(-5000, 5000)
@@ -850,19 +936,19 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
      */
     fun triggerTestUpdateModal() {
         val testRelease = AuraReleaseInfo(
-            version = "1.4.5",
-            tagName = "v1.4.5",
-            releaseTitle = "Aura v1.4.5 • Playlist Player Header, Notification Mascot Thumbnail & Search Playlists Filter",
+            version = "1.4.6",
+            tagName = "v1.4.6",
+            releaseTitle = "Aura v1.4.6 • Circled App Icon, Black Downloading Pill & Playlist Likes/Options",
             releaseNotes = """
-# Aura v1.4.5
+# Aura v1.4.6
 
-Release Tags: [release, v1.4.5, android, kotlin, jetpack-compose, in-app-update, notifications, search-filter, playlist-header]
+Release Tags: [release, v1.4.6, android, kotlin, jetpack-compose, in-app-update, playlist-like, playlist-options]
 
 ---
 
 ## Overview
 
-Aura v1.4.5 delivers playlist title display fixes in the full-screen player header, push notification mascot rendering with a circular thumbnail and direct deep-linking into update installation, and accurate playlist search filtering.
+Aura v1.4.6 introduces circled app icon branding in push notifications and the in-app update screen, black downloading progress pill typography, and full playlist liking and saving with 3-dot options across Search and Playlist Details.
 
 ---
 

@@ -80,6 +80,7 @@ import com.auramusic.app.domain.model.AuraTrack
 import com.auramusic.app.domain.model.YtmCommunityPlaylist
 import com.auramusic.app.domain.model.YtmTopArtist
 import com.auramusic.app.ui.components.AuraAddToPlaylistModal
+import com.auramusic.app.ui.components.AuraCommunityPlaylistOptionsModal
 import com.auramusic.app.ui.components.AuraCreatePlaylistModal
 import com.auramusic.app.ui.components.AuraTrackOptionsModal
 import com.auramusic.app.ui.components.TrackItemSkeleton
@@ -155,11 +156,14 @@ fun SearchScreen(
     onCreatePlaylist: (name: String, description: String, coverUrl: String) -> Unit = { _, _, _ -> },
     onRemoveRecentlyPlayed: (AuraTrack) -> Unit = {},
     onOpenArtist: (String, String) -> Unit = { _, _ -> },
-    onOpenCommunityPlaylist: (YtmCommunityPlaylist) -> Unit = {}
+    onOpenCommunityPlaylist: (YtmCommunityPlaylist) -> Unit = {},
+    onPlayCommunityPlaylist: (YtmCommunityPlaylist) -> Unit = {},
+    onToggleSaveCommunityPlaylist: (YtmCommunityPlaylist) -> Unit = {}
 ) {
     val context = LocalContext.current
     var isSearchActive by rememberSaveable { mutableStateOf(query.isNotBlank()) }
     var selectedModalTrack by remember { mutableStateOf<AuraTrack?>(null) }
+    var selectedCommunityPlaylistForOptions by remember { mutableStateOf<YtmCommunityPlaylist?>(null) }
     var trackForAddToPlaylist by remember { mutableStateOf<AuraTrack?>(null) }
     var showCreatePlaylistModal by remember { mutableStateOf(false) }
     val focusRequester = remember { FocusRequester() }
@@ -233,7 +237,10 @@ fun SearchScreen(
                 onRemoveRecentlyPlayed = onRemoveRecentlyPlayed,
                 onOptionsClick = { selectedModalTrack = it },
                 onOpenArtist = onOpenArtist,
-                onOpenCommunityPlaylist = onOpenCommunityPlaylist
+                onOpenCommunityPlaylist = onOpenCommunityPlaylist,
+                playlists = playlists,
+                onToggleSaveCommunityPlaylist = onToggleSaveCommunityPlaylist,
+                onCommunityPlaylistOptionsClick = { selectedCommunityPlaylistForOptions = it }
             )
         }
 
@@ -310,6 +317,21 @@ fun SearchScreen(
                     onCreatePlaylist(title, desc, coverUri)
                     Toast.makeText(context, "Created playlist: $title", Toast.LENGTH_SHORT).show()
                 }
+            )
+        }
+
+        // Modal: Community / Search Playlist 3-Dot Options Modal
+        selectedCommunityPlaylistForOptions?.let { pl ->
+            val isSaved = playlists.any {
+                it.id == pl.id || it.id == "ytm_${pl.id}" || it.id.removePrefix("VL") == pl.id.removePrefix("VL")
+            }
+            AuraCommunityPlaylistOptionsModal(
+                playlist = pl,
+                isSaved = isSaved,
+                onDismiss = { selectedCommunityPlaylistForOptions = null },
+                onToggleSave = { onToggleSaveCommunityPlaylist(pl) },
+                onPlayPlaylist = { onPlayCommunityPlaylist(pl) },
+                onOpenDetails = { onOpenCommunityPlaylist(pl) }
             )
         }
     }
@@ -644,7 +666,10 @@ private fun DedicatedSearchingView(
     onRemoveRecentlyPlayed: (AuraTrack) -> Unit,
     onOptionsClick: (AuraTrack) -> Unit,
     onOpenArtist: (String, String) -> Unit,
-    onOpenCommunityPlaylist: (YtmCommunityPlaylist) -> Unit = {}
+    onOpenCommunityPlaylist: (YtmCommunityPlaylist) -> Unit = {},
+    playlists: List<AuraPlaylist> = emptyList(),
+    onToggleSaveCommunityPlaylist: (YtmCommunityPlaylist) -> Unit = {},
+    onCommunityPlaylistOptionsClick: (YtmCommunityPlaylist) -> Unit = {}
 ) {
     val listState = rememberLazyListState()
     val focusManager = LocalFocusManager.current
@@ -880,12 +905,26 @@ private fun DedicatedSearchingView(
                         }
                     } else {
                         items(playlistResults.distinctBy { it.id }, key = { "pl_res_${it.id}" }) { playlist ->
+                            val isSaved = playlists.any { pl ->
+                                pl.id == playlist.id ||
+                                pl.id == "ytm_${playlist.id}" ||
+                                pl.id.removePrefix("VL") == playlist.id.removePrefix("VL")
+                            }
                             SearchResultPlaylistTile(
                                 playlist = playlist,
+                                isSaved = isSaved,
                                 onClick = {
                                     focusManager.clearFocus()
                                     keyboardController?.hide()
                                     onOpenCommunityPlaylist(playlist)
+                                },
+                                onToggleSave = {
+                                    onToggleSaveCommunityPlaylist(playlist)
+                                },
+                                onOptionsClick = {
+                                    focusManager.clearFocus()
+                                    keyboardController?.hide()
+                                    onCommunityPlaylistOptionsClick(playlist)
                                 }
                             )
                         }
@@ -1191,7 +1230,10 @@ private fun FeaturingAlbumCard(
 @Composable
 private fun SearchResultPlaylistTile(
     playlist: YtmCommunityPlaylist,
-    onClick: () -> Unit
+    isSaved: Boolean,
+    onClick: () -> Unit,
+    onToggleSave: () -> Unit,
+    onOptionsClick: () -> Unit
 ) {
     Row(
         modifier = Modifier
@@ -1238,6 +1280,32 @@ private fun SearchResultPlaylistTile(
                 color = TextSecondary,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
+            )
+        }
+
+        // Heart / Like Button
+        IconButton(
+            onClick = onToggleSave,
+            modifier = Modifier.size(36.dp)
+        ) {
+            Icon(
+                imageVector = if (isSaved) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
+                contentDescription = if (isSaved) "Liked playlist" else "Like playlist",
+                tint = if (isSaved) AuraNeonLime else TextSecondary,
+                modifier = Modifier.size(20.dp)
+            )
+        }
+
+        // 3-Dot Options Button
+        IconButton(
+            onClick = onOptionsClick,
+            modifier = Modifier.size(36.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.MoreVert,
+                contentDescription = "Playlist options",
+                tint = TextSecondary,
+                modifier = Modifier.size(20.dp)
             )
         }
     }
