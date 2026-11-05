@@ -18,9 +18,9 @@ android {
         // Dynamic version code & name: CI build run number or Gradle parameter with local defaults
         val ciVersionCode = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull()
         val propVersionCode = (project.findProperty("versionCode") as? String)?.toIntOrNull()
-        versionCode = propVersionCode ?: ciVersionCode ?: 19
+        versionCode = propVersionCode ?: ciVersionCode ?: 24
 
-        versionName = "1.4.7"
+        versionName = "1.4.8"
         val propVersionName = project.findProperty("versionName") as? String
         val envVersionName = System.getenv("APP_VERSION_NAME")
         if (propVersionName != null) {
@@ -106,6 +106,8 @@ android {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
             excludes += "META-INF/DEPENDENCIES"
             excludes += "META-INF/INDEX.LIST"
+            // Kuromoji includes duplicate documentation files in its core and IPADIC jars.
+            excludes += "META-INF/*.md"
         }
     }
 
@@ -161,6 +163,9 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.coroutines.guava)
+
+    // Dictionary-backed kanji readings keep Japanese romaji lyrics complete.
+    implementation("com.atilika.kuromoji:kuromoji-ipadic:0.9.0")
 
     // Firebase Cloud Messaging & In-App Push Notifications
     implementation(platform(libs.firebase.bom))

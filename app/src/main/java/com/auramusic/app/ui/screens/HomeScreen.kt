@@ -20,10 +20,12 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -34,7 +36,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -70,6 +71,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
@@ -78,6 +80,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.auramusic.app.core.extractor.SimpMusicExtractorEngine
+import com.auramusic.app.core.recommendations.LocalRecommendationEngine
 import com.auramusic.app.domain.model.AuraPalette
 import com.auramusic.app.domain.model.AuraPlaylist
 import com.auramusic.app.domain.model.AuraTrack
@@ -120,13 +123,18 @@ fun HomeScreen(
     currentPlayingId: String? = null,
     isPlaying: Boolean = false,
     recentlyPlayed: List<AuraTrack> = emptyList(),
+    homeRecommendations: List<AuraTrack> = emptyList(),
+    albumRecommendations: List<AuraTrack> = emptyList(),
+    likedRecommendations: List<AuraTrack> = emptyList(),
     userPlaylists: List<AuraPlaylist> = emptyList(),
     topArtists: List<YtmTopArtist> = emptyList(),
     communityPlaylists: List<YtmCommunityPlaylist> = emptyList(),
+    musicVideos: List<AuraTrack> = emptyList(),
     activeCategory: String = "All",
     categoryTracks: List<AuraTrack> = emptyList(),
     isCategoryLoading: Boolean = false,
     onPlayTrack: (AuraTrack, List<AuraTrack>) -> Unit,
+    onPlayMusicVideo: (AuraTrack, List<AuraTrack>) -> Unit = { track, queue -> onPlayTrack(track, queue) },
     onPlayArtist: (YtmTopArtist) -> Unit = {},
     onOpenArtist: (YtmTopArtist) -> Unit = {},
     onPlayCommunityPlaylist: (YtmCommunityPlaylist) -> Unit = {},
@@ -148,19 +156,31 @@ fun HomeScreen(
 
     val liveTopTracks = chartSections.firstOrNull()?.tracks?.ifEmpty { SimpMusicExtractorEngine.DEFAULT_SEED_TRACKS }
         ?: SimpMusicExtractorEngine.DEFAULT_SEED_TRACKS
-    val heroTrack = liveTopTracks.firstOrNull()
-    val playlistTracks = liveTopTracks
-    val displayedTracks = if (activeCategory != "All" && categoryTracks.isNotEmpty()) categoryTracks else playlistTracks
-    var visibleTrackCount by remember(displayedTracks) { androidx.compose.runtime.mutableIntStateOf(20) }
-
     val greeting = remember {
-        val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
-        when {
-            hour < 12 -> "Good morning"
-            hour < 18 -> "Good afternoon"
+        when (Calendar.getInstance().get(Calendar.HOUR_OF_DAY)) {
+            in 0..11 -> "Good morning"
+            in 12..17 -> "Good afternoon"
             else -> "Good evening"
         }
     }
+    val heroTrack = liveTopTracks.firstOrNull()
+    val playlistTracks = liveTopTracks
+    val personalizedHomeTracks = homeRecommendations.ifEmpty { playlistTracks }
+    val quickPickTracks = (if (activeCategory != "All") categoryTracks else personalizedHomeTracks).take(20)
+    val displayedTracks = if (activeCategory != "All") categoryTracks else personalizedHomeTracks
+    val categoryTrackPool = if (activeCategory == "All") emptyList() else categoryTracks
+    val visibleTopArtists = if (activeCategory == "All") topArtists else topArtists.filter { artist ->
+        categoryTrackPool.any { track ->
+            track.artist.contains(artist.name, ignoreCase = true) || artist.name.contains(track.artist, ignoreCase = true)
+        }
+    }
+    val visibleRecentlyPlayed = if (activeCategory == "All") recentlyPlayed else recentlyPlayed.filter {
+        LocalRecommendationEngine.categoryMatches(it, categoryTrackPool)
+    }
+    val visibleUserPlaylists = if (activeCategory == "All") userPlaylists else userPlaylists.filter { playlist ->
+        playlist.tracks.any { LocalRecommendationEngine.categoryMatches(it, categoryTrackPool) }
+    }
+    var visibleTrackCount by remember(displayedTracks) { androidx.compose.runtime.mutableIntStateOf(20) }
 
     // Pulse animation for the LOSSLESS indicator dot
     val infiniteTransition = rememberInfiniteTransition(label = "losslessPulse")
@@ -180,51 +200,285 @@ fun HomeScreen(
             .background(SpotifyPitchBlack),
         contentPadding = PaddingValues(bottom = 140.dp)
     ) {
-        // 1. Dynamic Greeting Header: Good morning / afternoon / evening (Screen starts directly here)
         item {
-            Spacer(modifier = Modifier.height(18.dp))
-            Text(
-                text = greeting,
-                style = MaterialTheme.typography.headlineLarge,
-                color = Color.White,
-                fontWeight = FontWeight.Bold,
-                fontSize = 28.sp,
-                modifier = Modifier.padding(horizontal = 20.dp)
-            )
-            Spacer(modifier = Modifier.height(14.dp))
+            Column {
+                Spacer(modifier = Modifier.height(18.dp))
+                Text(
+                    text = greeting,
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 28.sp,
+                    modifier = Modifier.padding(horizontal = 20.dp)
+                )
+                Spacer(modifier = Modifier.height(14.dp))
+                val filterList = listOf("All", "New Release", "Trending", "Top Chart", "Podcasts")
+                LazyRow(
+                    contentPadding = PaddingValues(horizontal = 20.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(filterList) { filter ->
+                        val isSelected = activeCategory == filter
+                        Surface(
+                            shape = CircleShape,
+                            color = if (isSelected) AuraNeonLime else AuraPillInactive,
+                            modifier = Modifier
+                                .clip(CircleShape)
+                                .clickable { onSelectCategory(filter) }
+                        ) {
+                            Text(
+                                text = filter,
+                                color = if (isSelected) Color.Black else AuraPillInactiveText,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 11.5.sp,
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
+                            )
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(22.dp))
+            }
         }
 
-        // 2. Filter Pills: All, New Release, Trending, Top Chart, Podcasts (Queries Active)
-        item {
-            val filterList = listOf("All", "New Release", "Trending", "Top Chart", "Podcasts")
-            LazyRow(
-                contentPadding = PaddingValues(horizontal = 20.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                items(filterList) { filter ->
-                    val isSelected = activeCategory == filter
-                    Surface(
-                        shape = CircleShape,
-                        color = if (isSelected) AuraNeonLime else AuraPillInactive,
+        // Quick picks: four compact rows per horizontal page, matching YouTube Music's shelf.
+        if (quickPickTracks.isNotEmpty() || (activeCategory != "All" && isCategoryLoading)) {
+            item {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 26.dp)
+                ) {
+                    Row(
                         modifier = Modifier
-                            .clip(CircleShape)
-                            .clickable { onSelectCategory(filter) }
+                            .fillMaxWidth()
+                            .padding(horizontal = 20.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Text(
-                            text = filter,
-                            color = if (isSelected) Color.Black else AuraPillInactiveText,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 11.5.sp,
-                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp)
+                            text = if (activeCategory == "All") "Quick picks" else "$activeCategory picks",
+                            color = Color.White,
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 23.sp
                         )
+                        HomePlayAllButton {
+                            quickPickTracks.firstOrNull()?.let { onPlayTrack(it, quickPickTracks) }
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(12.dp))
+                    if (quickPickTracks.isEmpty()) {
+                        Box(
+                            modifier = Modifier.fillMaxWidth().height(68.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            CircularProgressIndicator(
+                                color = AuraNeonLime,
+                                strokeWidth = 2.dp,
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
+                    } else BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+                        val pageWidth = (maxWidth - 56.dp).coerceAtLeast(280.dp)
+                        LazyRow(
+                            contentPadding = PaddingValues(horizontal = 20.dp),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            items(quickPickTracks.chunked(4)) { page ->
+                                Column(
+                                    modifier = Modifier.width(pageWidth),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    page.forEach { track ->
+                                        val isCurrent = currentPlayingId == track.videoId
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .height(68.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            AsyncImage(
+                                                model = track.highResArtworkUrl,
+                                                contentDescription = track.title,
+                                                contentScale = ContentScale.Crop,
+                                                modifier = Modifier
+                                                    .size(60.dp)
+                                                    .clip(RoundedCornerShape(6.dp))
+                                                    .background(Color(0xFF202127))
+                                                    .clickable { onPlayTrack(track, quickPickTracks) }
+                                            )
+                                            Column(
+                                                modifier = Modifier
+                                                    .weight(1f)
+                                                    .padding(start = 14.dp)
+                                                    .clip(RoundedCornerShape(4.dp))
+                                                    .clickable { onPlayTrack(track, quickPickTracks) }
+                                                    .padding(vertical = 5.dp)
+                                            ) {
+                                                Text(
+                                                    text = track.title,
+                                                    color = if (isCurrent) AuraNeonLime else Color.White,
+                                                    fontSize = 15.5.sp,
+                                                    fontWeight = FontWeight.Medium,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                                val albumLabel = track.album.takeIf {
+                                                    it.isNotBlank() && !it.equals("YouTube Music", ignoreCase = true)
+                                                }
+                                                Text(
+                                                    text = if (albumLabel != null) "${track.artist}  •  $albumLabel" else track.artist,
+                                                    color = TextSecondary,
+                                                    fontSize = 13.5.sp,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            }
+                                            IconButton(
+                                                onClick = { selectedTrackForOptions = track },
+                                                modifier = Modifier.size(42.dp)
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Rounded.MoreVert,
+                                                    contentDescription = "Options for ${track.title}",
+                                                    tint = Color.White,
+                                                    modifier = Modifier.size(22.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
-            Spacer(modifier = Modifier.height(16.dp))
+        }
+
+        // Wide 16:9 video cards in a horizontal shelf, with a partial next card as a swipe cue.
+        if (musicVideos.isNotEmpty() || isLoading || isCategoryLoading) {
+            item {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 26.dp)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 20.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = if (activeCategory == "All") "Music videos for you" else "$activeCategory videos",
+                            color = Color.White,
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 23.sp
+                        )
+                        if (musicVideos.isNotEmpty()) {
+                            HomePlayAllButton {
+                                onPlayMusicVideo(musicVideos.first(), musicVideos)
+                            }
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(14.dp))
+                    if (musicVideos.isEmpty()) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(190.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            CircularProgressIndicator(
+                                color = AuraNeonLime,
+                                strokeWidth = 2.dp,
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
+                    } else {
+                        BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+                            val cardWidth = (maxWidth - 56.dp).coerceAtLeast(280.dp)
+                            LazyRow(
+                                contentPadding = PaddingValues(horizontal = 20.dp),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                items(musicVideos, key = { "home_video_${it.videoId}" }) { video ->
+                                    Box(
+                                        modifier = Modifier
+                                            .width(cardWidth)
+                                            .aspectRatio(16f / 9f)
+                                            .clip(RoundedCornerShape(6.dp))
+                                            .background(Color(0xFF202127))
+                                            .clickable { onPlayMusicVideo(video, musicVideos) }
+                                    ) {
+                                        AsyncImage(
+                                            model = video.highResArtworkUrl,
+                                            contentDescription = "Play ${video.title}",
+                                            contentScale = ContentScale.Crop,
+                                            modifier = Modifier.fillMaxSize()
+                                        )
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .height(76.dp)
+                                                .align(Alignment.BottomCenter)
+                                                .background(
+                                                    Brush.verticalGradient(
+                                                        listOf(Color.Transparent, Color.Black.copy(alpha = 0.78f))
+                                                    )
+                                                )
+                                        )
+                                        Text(
+                                            text = video.title,
+                                            color = Color.White,
+                                            fontWeight = FontWeight.SemiBold,
+                                            fontSize = 15.sp,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier
+                                                .align(Alignment.BottomStart)
+                                                .padding(start = 14.dp, end = 54.dp, bottom = 11.dp)
+                                        )
+                                        Surface(
+                                            shape = CircleShape,
+                                            color = Color.Black.copy(alpha = 0.54f),
+                                            modifier = Modifier
+                                                .align(Alignment.BottomEnd)
+                                                .padding(10.dp)
+                                                .size(36.dp)
+                                        ) {
+                                            Box(contentAlignment = Alignment.Center) {
+                                                Icon(
+                                                    imageVector = Icons.Rounded.PlayArrow,
+                                                    contentDescription = "Play ${video.title}",
+                                                    tint = Color.White,
+                                                    modifier = Modifier.size(24.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if (likedRecommendations.isNotEmpty()) {
+            item {
+                HomeRecommendationShelf(
+                    title = if (activeCategory == "All") "Liked songs for you" else "$activeCategory from your likes",
+                    tracks = likedRecommendations,
+                    currentPlayingId = currentPlayingId,
+                    isPlaying = isPlaying,
+                    onPlayTrack = onPlayTrack,
+                    keyPrefix = "liked_pick"
+                )
+            }
         }
 
         // 3. Top Artists Carousel (Live YouTube Music Charts FEmusic_charts)
-        if (topArtists.isNotEmpty() || isLoading) {
+        if (visibleTopArtists.isNotEmpty() || (activeCategory == "All" && isLoading)) {
             item {
                 Column(modifier = Modifier.fillMaxWidth().padding(bottom = 22.dp)) {
                     Row(
@@ -243,14 +497,14 @@ fun HomeScreen(
                         )
                     }
                     Spacer(modifier = Modifier.height(14.dp))
-                    if (topArtists.isEmpty() && isLoading) {
+                    if (visibleTopArtists.isEmpty() && isLoading) {
                         com.auramusic.app.ui.components.ArtistCarouselSkeleton()
                     } else {
                         LazyRow(
                             contentPadding = PaddingValues(horizontal = 20.dp),
                             horizontalArrangement = Arrangement.spacedBy(16.dp)
                         ) {
-                            items(topArtists, key = { "artist_${it.id}" }) { artist ->
+                            items(visibleTopArtists, key = { "artist_${it.id}" }) { artist ->
                                 Column(
                                     horizontalAlignment = Alignment.CenterHorizontally,
                                     modifier = Modifier
@@ -296,7 +550,7 @@ fun HomeScreen(
         }
 
         // 4b. Top Playlists / User-Uploaded Community Playlists
-        if (communityPlaylists.isNotEmpty() || isLoading) {
+        if (activeCategory == "All" && (communityPlaylists.isNotEmpty() || isLoading)) {
             item {
                 Column(modifier = Modifier.fillMaxWidth().padding(bottom = 22.dp)) {
                     Row(
@@ -386,7 +640,7 @@ fun HomeScreen(
         }
 
         // 4b. Recently Played Carousel (Real dynamically tracked history)
-        if (recentlyPlayed.isNotEmpty()) {
+        if (visibleRecentlyPlayed.isNotEmpty()) {
             item {
                 Column(modifier = Modifier.fillMaxWidth().padding(bottom = 22.dp)) {
                     Text(
@@ -402,13 +656,13 @@ fun HomeScreen(
                         contentPadding = PaddingValues(horizontal = 20.dp),
                         horizontalArrangement = Arrangement.spacedBy(14.dp)
                     ) {
-                        items(recentlyPlayed.take(15), key = { "recent_${it.videoId}" }) { track ->
+                        items(visibleRecentlyPlayed.take(15), key = { "recent_${it.videoId}" }) { track ->
                             val isTrackCurrent = currentPlayingId == track.videoId
                             Column(
                                 modifier = Modifier
                                     .width(120.dp)
                                     .clip(RoundedCornerShape(16.dp))
-                                    .clickable { onPlayTrack(track, recentlyPlayed) }
+                                    .clickable { onPlayTrack(track, visibleRecentlyPlayed) }
                             ) {
                                 Box(
                                     modifier = Modifier
@@ -462,7 +716,7 @@ fun HomeScreen(
         }
 
         // 4c. Your Playlists Carousel (User & Imported Spotify Playlists)
-        if (userPlaylists.isNotEmpty()) {
+        if (visibleUserPlaylists.isNotEmpty()) {
             item {
                 Column(modifier = Modifier.fillMaxWidth().padding(bottom = 22.dp)) {
                     Text(
@@ -474,45 +728,114 @@ fun HomeScreen(
                         modifier = Modifier.padding(horizontal = 20.dp)
                     )
                     Spacer(modifier = Modifier.height(12.dp))
-                    LazyRow(
-                        contentPadding = PaddingValues(horizontal = 20.dp),
-                        horizontalArrangement = Arrangement.spacedBy(14.dp)
-                    ) {
-                        items(userPlaylists, key = { "pl_${it.id}" }) { pl ->
-                            Column(
-                                modifier = Modifier
-                                    .width(120.dp)
-                                    .clip(RoundedCornerShape(16.dp))
-                                    .clickable {
-                                        onOpenUserPlaylist(pl)
+                    if (visibleUserPlaylists.size >= 4) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 20.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            visibleUserPlaylists.chunked(2).forEach { rowPlaylists ->
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    rowPlaylists.forEach { pl ->
+                                        Row(
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .height(64.dp)
+                                                .clip(RoundedCornerShape(6.dp))
+                                                .background(Color(0xFF242529))
+                                                .clickable { onOpenUserPlaylist(pl) }
+                                                .padding(end = 8.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            com.auramusic.app.ui.components.AuraPlaylistCover(
+                                                coverUrl = pl.coverUrl,
+                                                tracks = pl.tracks,
+                                                modifier = Modifier.size(64.dp),
+                                                shape = RoundedCornerShape(topStart = 6.dp, bottomStart = 6.dp)
+                                            )
+                                            Column(
+                                                modifier = Modifier
+                                                    .weight(1f)
+                                                    .padding(start = 9.dp)
+                                            ) {
+                                                Text(
+                                                    text = pl.name,
+                                                    color = Color.White,
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    fontSize = 12.sp,
+                                                    maxLines = 2,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                                Text(
+                                                    text = "${pl.tracks.size} songs",
+                                                    color = TextSecondary,
+                                                    fontSize = 10.5.sp,
+                                                    maxLines = 1
+                                                )
+                                            }
+                                        }
                                     }
-                            ) {
-                                com.auramusic.app.ui.components.AuraPlaylistCover(
-                                    coverUrl = pl.coverUrl,
-                                    tracks = pl.tracks,
-                                    modifier = Modifier.size(120.dp),
-                                    shape = RoundedCornerShape(16.dp)
-                                )
-                                Spacer(modifier = Modifier.height(8.dp))
-                                Text(
-                                    text = pl.name,
-                                    color = Color.White,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 13.sp,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                Text(
-                                    text = "${pl.tracks.size} songs",
-                                    color = TextSecondary,
-                                    fontSize = 11.5.sp,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
+                                    if (rowPlaylists.size == 1) Spacer(modifier = Modifier.weight(1f))
+                                }
+                            }
+                        }
+                    } else {
+                        LazyRow(
+                            contentPadding = PaddingValues(horizontal = 20.dp),
+                            horizontalArrangement = Arrangement.spacedBy(14.dp)
+                        ) {
+                            items(visibleUserPlaylists, key = { "pl_${it.id}" }) { pl ->
+                                Column(
+                                    modifier = Modifier
+                                        .width(120.dp)
+                                        .clip(RoundedCornerShape(16.dp))
+                                        .clickable { onOpenUserPlaylist(pl) }
+                                ) {
+                                    com.auramusic.app.ui.components.AuraPlaylistCover(
+                                        coverUrl = pl.coverUrl,
+                                        tracks = pl.tracks,
+                                        modifier = Modifier.size(120.dp),
+                                        shape = RoundedCornerShape(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Text(
+                                        text = pl.name,
+                                        color = Color.White,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 13.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        text = "${pl.tracks.size} songs",
+                                        color = TextSecondary,
+                                        fontSize = 11.5.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
                             }
                         }
                     }
                 }
+            }
+        }
+
+        if (albumRecommendations.isNotEmpty()) {
+            item {
+                HomeRecommendationShelf(
+                    title = if (activeCategory == "All") "Albums for you" else "$activeCategory albums",
+                    tracks = albumRecommendations,
+                    currentPlayingId = currentPlayingId,
+                    isPlaying = isPlaying,
+                    onPlayTrack = onPlayTrack,
+                    titleForTrack = { track ->
+                        track.album.takeIf { it.isNotBlank() && !it.equals("YouTube Music", true) }
+                            ?: track.title
+                    },
+                    keyPrefix = "album_pick"
+                )
             }
         }
 
@@ -1111,8 +1434,114 @@ fun SpotifyTrackRowItem(
     }
 }
 
+@Composable
+private fun HomePlayAllButton(onClick: () -> Unit) {
+    Surface(
+        shape = CircleShape,
+        color = Color.Transparent,
+        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.28f)),
+        modifier = Modifier
+            .clip(CircleShape)
+            .clickable(onClick = onClick)
+    ) {
+        Text(
+            text = "Play all",
+            color = Color.White,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Medium,
+            modifier = Modifier.padding(horizontal = 13.dp, vertical = 6.dp)
+        )
+    }
+}
+
 fun formatDuration(seconds: Int): String {
     val mins = (seconds / 60).coerceAtLeast(0)
     val secs = (seconds % 60).coerceAtLeast(0)
     return "%d:%02d".format(mins, secs)
+}
+
+@Composable
+private fun HomeRecommendationShelf(
+    title: String,
+    tracks: List<AuraTrack>,
+    currentPlayingId: String?,
+    isPlaying: Boolean,
+    onPlayTrack: (AuraTrack, List<AuraTrack>) -> Unit,
+    titleForTrack: (AuraTrack) -> String = { it.title },
+    keyPrefix: String
+) {
+    if (tracks.isEmpty()) return
+    Column(modifier = Modifier.fillMaxWidth().padding(bottom = 22.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(
+                text = title,
+                color = Color.White,
+                fontWeight = FontWeight.Bold,
+                fontSize = 19.sp
+            )
+            HomePlayAllButton { tracks.firstOrNull()?.let { onPlayTrack(it, tracks) } }
+        }
+        Spacer(modifier = Modifier.height(12.dp))
+        LazyRow(
+            contentPadding = PaddingValues(horizontal = 20.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            items(tracks, key = { "${keyPrefix}_${it.videoId}" }) { track ->
+                val isCurrent = currentPlayingId == track.videoId
+                Column(
+                    modifier = Modifier
+                        .width(132.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable { onPlayTrack(track, tracks) }
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(132.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Color(0xFF202127))
+                    ) {
+                        AsyncImage(
+                            model = track.highResArtworkUrl,
+                            contentDescription = titleForTrack(track),
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                        if (isCurrent) {
+                            Box(
+                                modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.45f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                                    contentDescription = null,
+                                    tint = AuraNeonLime,
+                                    modifier = Modifier.size(28.dp)
+                                )
+                            }
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(7.dp))
+                    Text(
+                        text = titleForTrack(track),
+                        color = if (isCurrent) AuraNeonLime else Color.White,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 13.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = track.artist,
+                        color = TextSecondary,
+                        fontSize = 11.5.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+        }
+    }
 }

@@ -499,6 +499,63 @@ object SimpMusicExtractorEngine {
      * is NEVER maximized as a fake video.
      * Returns null if no authentic official video stream is available.
      */
+    private fun primaryArtistName(artist: String): String =
+        artist
+            .replace(Regex("(?i)\\s+(feat(?:uring)?|ft\\.?|with)\\s+.*$"), "")
+            .trim()
+
+    private fun normalizedVideoMatchText(value: String): String =
+        value.lowercase()
+            .replace(Regex("(?i)\\b(official|music|video|mv|vevo|topic|hd|4k)\\b"), " ")
+            .replace(Regex("[^\\p{L}\\p{N}]+"), " ")
+            .trim()
+
+    private fun officialVideoMatchScore(candidateTitle: String, requestedTitle: String): Float {
+        val wanted = normalizedVideoMatchText(requestedTitle).split(Regex("\\s+")).filter(String::isNotBlank).toSet()
+        val actual = normalizedVideoMatchText(candidateTitle).split(Regex("\\s+")).filter(String::isNotBlank).toSet()
+        if (wanted.isEmpty() || actual.isEmpty()) return 0f
+        return wanted.intersect(actual).size.toFloat() / wanted.size
+    }
+
+    private fun isOfficialVideoMatch(
+        candidate: AuraTrack,
+        requestedTitle: String,
+        requestedArtist: String,
+        currentVideoId: String
+    ): Boolean {
+        if (candidate.videoId.isBlank() || candidate.videoId == currentVideoId) return false
+
+        val title = candidate.title.lowercase()
+        val artist = candidate.artist.lowercase()
+        val hasOfficialCue =
+            Regex("\\b(official|vevo)\\b").containsMatchIn(title) ||
+                Regex("\\b(mv|vevo|official)\\b").containsMatchIn(artist) ||
+                Regex("\\bmv\\b").containsMatchIn(title)
+        if (!hasOfficialCue) return false
+
+        val excludedTerms = listOf(
+            "cover", "karaoke", "lyrics", "lyric video", "reaction", "instrumental", "audio", "live", "acoustic",
+            "tribute", "fan made", "slowed", "sped up", "nightcore", "audio only", " - topic"
+        )
+        if (excludedTerms.any { title.contains(it) || artist.contains(it) }) return false
+
+        val wantedTitleWords = normalizedVideoMatchText(requestedTitle)
+            .split(Regex("\\s+")).filter(String::isNotBlank).toSet()
+        val foundTitleWords = normalizedVideoMatchText(candidate.title)
+            .split(Regex("\\s+")).filter(String::isNotBlank).toSet()
+        if (wantedTitleWords.isEmpty() || foundTitleWords.isEmpty()) return false
+        val titleMatch = wantedTitleWords.intersect(foundTitleWords).size.toFloat() / wantedTitleWords.size
+        if (titleMatch < 0.8f) return false
+
+        val wantedArtistWords = normalizedVideoMatchText(primaryArtistName(requestedArtist))
+            .split(Regex("\\s+")).filter(String::isNotBlank).toSet()
+        val foundArtistWords = normalizedVideoMatchText(candidate.artist)
+            .split(Regex("\\s+")).filter(String::isNotBlank).toSet()
+        if (wantedArtistWords.isEmpty() || foundArtistWords.isEmpty()) return false
+        val artistMatch = wantedArtistWords.intersect(foundArtistWords).size.toFloat() / wantedArtistWords.size
+        return artistMatch >= 0.6f
+    }
+
     suspend fun findOfficialMusicVideo(track: AuraTrack): AuraTrack? = withContext(Dispatchers.IO) {
         try {
             // If the current track is already explicitly an official music video (and not a Topic audio upload)
@@ -520,31 +577,24 @@ object SimpMusicExtractorEngine {
             }
 
             // Clean artist and title for YouTube search
-            val cleanArtist = track.artist.split(",", "&", "feat.", "ft.", "/").firstOrNull()?.trim() ?: track.artist
+            val cleanArtist = primaryArtistName(track.artist)
             val cleanTitle = track.title
                 .replace(Regex("(?i)\\(feat\\..*?\\)|\\[feat\\..*?\\]"), "")
                 .replace(Regex("(?i)\\b(official|music|video|audio|lyrics?|visualizer|remastered|remaster|hd|hq|4k)\\b"), "")
                 .substringBefore("(")
                 .substringBefore("[")
-                .substringBefore("-")
                 .trim()
 
             val titleForQuery = cleanTitle.ifBlank { track.title }
             val artistForQuery = cleanArtist.ifBlank { track.artist }
-            val query = "$titleForQuery $artistForQuery Music Video Official".trim()
+            val query = "$titleForQuery $artistForQuery official music video".trim()
 
             // 1. Search YouTube Music with video filter
             val results = searchYouTubeMusic(query, filter = "videos")
 
-            var candidate = results.firstOrNull { item ->
-                val lower = item.title.lowercase()
-                val lowerArtist = item.artist.lowercase()
-                val hasKeyword = lower.contains("official") || lower.contains("video") || lower.contains(" mv") || lower.endsWith("mv")
-                val isExcluded = lower.contains("audio") || lower.contains("lyric") || lower.contains("live") ||
-                        lower.contains("karaoke") || lower.contains("instrumental") || lower.contains("acoustic") ||
-                        lower.contains("reaction") || lowerArtist.contains("topic") || item.videoId == track.videoId
-                hasKeyword && !isExcluded
-            }
+            var candidate = results
+                .filter { isOfficialVideoMatch(it, titleForQuery, artistForQuery, track.videoId) }
+                .maxByOrNull { officialVideoMatchScore(it.title, titleForQuery) }
 
             // 2. Direct YouTube fallback search via NewPipe extractor if YouTube Music didn't find an MV
             if (candidate == null) {
@@ -554,14 +604,14 @@ object SimpMusicExtractorEngine {
                     extractor.fetchPage()
                     val items = extractor.initialPage?.items ?: emptyList()
                     val ytItem = items.filterIsInstance<StreamInfoItem>().firstOrNull { item ->
-                        val t = item.name?.lowercase() ?: ""
-                        val u = item.uploaderName?.lowercase() ?: ""
                         val vidId = item.url?.substringAfter("v=")?.substringBefore("&") ?: ""
-                        val hasKeyword = t.contains("official") || t.contains("video") || t.contains(" mv") || t.endsWith("mv")
-                        val isExcluded = t.contains("audio") || t.contains("lyric") || t.contains("live") ||
-                                t.contains("karaoke") || t.contains("instrumental") || t.contains("reaction") ||
-                                u.contains("topic") || vidId == track.videoId
-                        hasKeyword && !isExcluded && vidId.isNotBlank()
+                        val fallbackTrack = AuraTrack(
+                            id = "yt_$vidId",
+                            videoId = vidId,
+                            title = item.name.orEmpty(),
+                            artist = item.uploaderName?.replace(" - Topic", "")?.trim().orEmpty()
+                        )
+                        vidId.isNotBlank() && isOfficialVideoMatch(fallbackTrack, titleForQuery, artistForQuery, track.videoId)
                     }
                     if (ytItem != null) {
                         val vidId = ytItem.url?.substringAfter("v=")?.substringBefore("&") ?: ""

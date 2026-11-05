@@ -196,6 +196,34 @@ class AuraStorageRepository(context: Context) {
         return parseTrackArray(raw)
     }
 
+    fun recordRecommendationSignal(track: AuraTrack, signal: String) {
+        if (track.videoId.isBlank()) return
+        runCatching {
+            val all = JSONObject(prefs.getString("recommendation_signals", "{}") ?: "{}")
+            val row = all.optJSONObject(track.videoId) ?: JSONObject()
+            val key = when (signal) {
+                "play" -> "plays"
+                "complete" -> "completions"
+                "skip" -> "skips"
+                else -> return
+            }
+            row.put(key, row.optInt(key, 0) + 1)
+            all.put(track.videoId, row)
+            prefs.edit().putString("recommendation_signals", all.toString()).apply()
+        }
+    }
+
+    fun loadRecommendationInteractionScores(): Map<String, Float> = runCatching {
+        val all = JSONObject(prefs.getString("recommendation_signals", "{}") ?: "{}")
+        all.keys().asSequence().mapNotNull { videoId ->
+            val row = all.optJSONObject(videoId) ?: return@mapNotNull null
+            val score = row.optInt("plays") * 0.45f +
+                row.optInt("completions") * 1.4f -
+                row.optInt("skips") * 2.2f
+            videoId to score.coerceIn(-8f, 8f)
+        }.toMap()
+    }.getOrDefault(emptyMap())
+
     fun recordTrackPlay(track: AuraTrack): ListeningStats {
         recordRecentlyPlayed(track)
         val totalMin = prefs.getInt("stats_total_min", 48) + (track.durationSeconds / 60).coerceAtLeast(3)

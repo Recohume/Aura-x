@@ -151,9 +151,14 @@ suspend fun extractAuraPaletteFromUrl(artworkUrl: String): AuraPalette = withCon
             }.sortedByDescending { it.population }
 
             // Rich vibrant cover art color for single-color lyrics card & full-screen lyrics background
-            val rawCoverColorInt = vibrant?.takeIf { it.hsl[2] >= 0.10f }?.rgb
-                ?: colorfulSwatches.firstOrNull()?.rgb
+            // Prefer a color that occupies a meaningful part of the image. Palette's
+            // vibrant swatch can be a tiny accent and make the lyrics card feel unrelated.
+            val dominantColorful = colorfulSwatches.firstOrNull()?.takeIf { swatch ->
+                dominant == null || swatch.population >= dominant.population * 0.12f
+            }
+            val rawCoverColorInt = dominantColorful?.rgb
                 ?: dominant?.takeIf { it.hsl[1] >= 0.15f && it.hsl[2] in 0.10f..0.85f }?.rgb
+                ?: vibrant?.takeIf { it.hsl[2] >= 0.10f }?.rgb
                 ?: darkVibrant?.rgb
                 ?: lightVibrant?.rgb
                 ?: muted?.rgb
@@ -167,9 +172,6 @@ suspend fun extractAuraPaletteFromUrl(artworkUrl: String): AuraPalette = withCon
                 hsl[2] = 0.22f // Darken to deep luxury tone while preserving hue & saturation
             } else if (hsl[2] < 0.10f) {
                 hsl[2] = 0.16f // Prevent pitch-black
-            }
-            if (hsl[1] < 0.25f && colorfulSwatches.isNotEmpty()) {
-                hsl[1] = 0.35f
             }
             val coverColorInt = androidx.core.graphics.ColorUtils.HSLToColor(hsl)
 

@@ -191,7 +191,7 @@ class AuraMediaService : MediaSessionService() {
             .setShowActionsInCompactView(0, 1, 2)
 
         val builder = NotificationCompat.Builder(this, AuraApplication.CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_aura_notification)
+            .setSmallIcon(R.drawable.aura_app_icon_round)
             .setContentTitle(title)
             .setContentText(artist)
             .setSubText(album)

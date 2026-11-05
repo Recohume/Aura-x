@@ -25,6 +25,7 @@ import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -43,6 +44,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -78,6 +80,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -87,7 +90,9 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -114,7 +119,44 @@ import com.auramusic.app.ui.theme.TextSecondary
 fun AuraMainScreen(viewModel: AuraViewModel) {
     var selectedTab by remember { mutableIntStateOf(0) }
     var isPlayerExpanded by remember { mutableStateOf(false) }
+    var isPlayerCollapseTransition by remember { mutableStateOf(false) }
+    var isPlayerExpandTransition by remember { mutableStateOf(false) }
+    var fullPlayerArtworkBounds by remember { mutableStateOf<Rect?>(null) }
+    var miniPlayerArtworkBounds by remember { mutableStateOf<Rect?>(null) }
+    var fullPlayerContainerBounds by remember { mutableStateOf<Rect?>(null) }
+    var miniPlayerContainerBounds by remember { mutableStateOf<Rect?>(null) }
+    val collapseProgress = remember { Animatable(0f) }
+    val playerChromePushProgress = when {
+        isPlayerCollapseTransition || isPlayerExpandTransition -> 1f - collapseProgress.value
+        isPlayerExpanded -> 1f
+        else -> 0f
+    }.coerceIn(0f, 1f)
+    val screenScope = rememberCoroutineScope()
     var openedPlaylistFromHome by remember { mutableStateOf(false) }
+
+    LaunchedEffect(isPlayerCollapseTransition) {
+        if (isPlayerCollapseTransition) {
+            collapseProgress.animateTo(
+                targetValue = 1f,
+                animationSpec = tween(440, easing = CubicBezierEasing(0.4f, 0f, 0.2f, 1f))
+            )
+            isPlayerCollapseTransition = false
+        }
+    }
+
+    LaunchedEffect(
+        isPlayerExpandTransition,
+        fullPlayerContainerBounds != null,
+        fullPlayerArtworkBounds != null
+    ) {
+        if (isPlayerExpandTransition && fullPlayerContainerBounds != null && fullPlayerArtworkBounds != null) {
+            collapseProgress.animateTo(
+                targetValue = 0f,
+                animationSpec = tween(440, easing = CubicBezierEasing(0.4f, 0f, 0.2f, 1f))
+            )
+            isPlayerExpandTransition = false
+        }
+    }
 
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
@@ -130,14 +172,10 @@ fun AuraMainScreen(viewModel: AuraViewModel) {
     val chartSections by viewModel.chartSections.collectAsState()
     val topArtists by viewModel.topArtists.collectAsState()
     val communityPlaylists by viewModel.communityPlaylists.collectAsState()
+    val homeMusicVideos by viewModel.homeMusicVideos.collectAsState()
     val selectedArtistDetail by viewModel.selectedArtistDetail.collectAsState()
     val isArtistLoading by viewModel.isArtistLoading.collectAsState()
     val selectedPlaylistDetail by viewModel.selectedPlaylistDetail.collectAsState()
-
-    // Seamless Android system back handling
-    BackHandler(enabled = isPlayerExpanded) {
-        isPlayerExpanded = false
-    }
 
     BackHandler(enabled = !isPlayerExpanded && selectedArtistDetail != null) {
         viewModel.closeArtistDetail()
@@ -153,6 +191,9 @@ fun AuraMainScreen(viewModel: AuraViewModel) {
     val isPlaylistLoading by viewModel.isPlaylistLoading.collectAsState()
     val activeCategory by viewModel.activeCategory.collectAsState()
     val categoryTracks by viewModel.categoryTracks.collectAsState()
+    val homeRecommendations by viewModel.homeRecommendations.collectAsState()
+    val homeAlbumRecommendations by viewModel.homeAlbumRecommendations.collectAsState()
+    val homeLikedRecommendations by viewModel.homeLikedRecommendations.collectAsState()
     val isCategoryLoading by viewModel.isCategoryLoading.collectAsState()
     val moodCategories by viewModel.moodCategories.collectAsState()
     val isLoadingHome by viewModel.isLoadingHome.collectAsState()
@@ -202,6 +243,17 @@ fun AuraMainScreen(viewModel: AuraViewModel) {
     val livePerformances by viewModel.livePerformances.collectAsState()
     val isLoadingLivePerformances by viewModel.isLoadingLivePerformances.collectAsState()
     val downloadProgress by viewModel.downloadProgress.collectAsState()
+
+    val collapseFullPlayer: () -> Unit = {
+        if (isPlayerExpanded && !isPlayerCollapseTransition && !isPlayerExpandTransition) {
+            screenScope.launch {
+                collapseProgress.snapTo(0f)
+                isPlayerCollapseTransition = true
+                isPlayerExpanded = false
+            }
+        }
+    }
+    BackHandler(enabled = isPlayerExpanded, onBack = collapseFullPlayer)
 
     val context = LocalContext.current
     var pendingDownloadAction by remember { mutableStateOf<(() -> Unit)?>(null) }
@@ -259,13 +311,18 @@ fun AuraMainScreen(viewModel: AuraViewModel) {
                     currentPlayingId = currentTrack?.videoId,
                     isPlaying = isPlaying,
                     recentlyPlayed = recentlyPlayed,
+                    homeRecommendations = homeRecommendations,
+                    albumRecommendations = homeAlbumRecommendations,
+                    likedRecommendations = homeLikedRecommendations,
                     userPlaylists = playlists,
                     topArtists = topArtists,
                     communityPlaylists = communityPlaylists,
+                    musicVideos = homeMusicVideos,
                     activeCategory = activeCategory,
                     categoryTracks = categoryTracks,
                     isCategoryLoading = isCategoryLoading,
                     onPlayTrack = { track, queue -> viewModel.playTrack(track, queue) },
+                    onPlayMusicVideo = { track, queue -> viewModel.playHomeMusicVideo(track, queue) },
                     onPlayArtist = { artist -> viewModel.playArtist(artist) },
                     onOpenArtist = { artist -> viewModel.openArtistDetail(artist) },
                     onPlayCommunityPlaylist = { playlist -> viewModel.playCommunityPlaylist(playlist) },
@@ -426,12 +483,17 @@ fun AuraMainScreen(viewModel: AuraViewModel) {
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .navigationBarsPadding()
-                .padding(bottom = 6.dp),
+                .padding(bottom = 6.dp)
+                .zIndex(
+                    if (isPlayerCollapseTransition || isPlayerExpandTransition ||
+                        (!isPlayerExpanded && collapseProgress.value > 0f)
+                    ) 2f else 0f
+                ),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             // Reduced-size Floating MiniPlayer (closer with the menu)
             val activeTrack = currentTrack
-            if (activeTrack != null && !isPlayerExpanded) {
+            if (activeTrack != null && (!isPlayerExpanded || isPlayerCollapseTransition || isPlayerExpandTransition)) {
                 val currentQueue by AuraPlayerManager.queue.collectAsState()
                 val currentIndex = remember(currentQueue, activeTrack.videoId) {
                     currentQueue.indexOfFirst { it.videoId == activeTrack.videoId }
@@ -451,7 +513,19 @@ fun AuraMainScreen(viewModel: AuraViewModel) {
                     backgroundColor = palette.primary,
                     previousTrack = previousTrack,
                     nextTrack = nextTrack,
-                    onExpand = { isPlayerExpanded = true },
+                    hideArtworkForTransition = (isPlayerCollapseTransition || isPlayerExpandTransition) && !isVideoMode,
+                    isPlayerTransition = isPlayerCollapseTransition || isPlayerExpandTransition,
+                    collapseProgress = collapseProgress.value,
+                    onArtworkPositioned = { miniPlayerArtworkBounds = it },
+                    onPlayerBoundsPositioned = { miniPlayerContainerBounds = it },
+                    onExpand = {
+                        screenScope.launch {
+                            collapseProgress.snapTo(1f)
+                            isPlayerCollapseTransition = false
+                            isPlayerExpandTransition = true
+                            isPlayerExpanded = true
+                        }
+                    },
                     onTogglePlayPause = { AuraPlayerManager.togglePlayPause() },
                     onSkipPrevious = { AuraPlayerManager.skipToPrevious() },
                     onSkipNext = { AuraPlayerManager.skipToNext() }
@@ -461,7 +535,13 @@ fun AuraMainScreen(viewModel: AuraViewModel) {
 
             // Floating Dynamic Capsule Navigation Dock with increased width and height
             Box(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .graphicsLayer {
+                        // Keep the dock in the layout and let the growing player push it
+                        // below the viewport in sync with the shared full-player motion.
+                        translationY = (size.height + 80.dp.toPx()) * playerChromePushProgress
+                    },
                 contentAlignment = Alignment.Center
             ) {
                 Surface(
@@ -571,17 +651,43 @@ fun AuraMainScreen(viewModel: AuraViewModel) {
         // Full-Screen Now Playing Sheet
         val activeTrack = currentTrack
         AnimatedVisibility(
-            visible = isPlayerExpanded && activeTrack != null,
-            enter = slideInVertically(
-                initialOffsetY = { it },
-                animationSpec = tween(durationMillis = 350, easing = CubicBezierEasing(0.23f, 1f, 0.32f, 1f))
-            ),
-            exit = slideOutVertically(
-                targetOffsetY = { it },
-                animationSpec = tween(durationMillis = 300, easing = CubicBezierEasing(0.23f, 1f, 0.32f, 1f))
-            ),
+            visible = (isPlayerExpanded || isPlayerCollapseTransition || isPlayerExpandTransition) && activeTrack != null,
+            enter = if (isPlayerExpandTransition) {
+                androidx.compose.animation.EnterTransition.None
+            } else {
+                slideInVertically(
+                    initialOffsetY = { it },
+                    animationSpec = tween(durationMillis = 350, easing = CubicBezierEasing(0.23f, 1f, 0.32f, 1f))
+                )
+            },
+            exit = androidx.compose.animation.ExitTransition.None,
             modifier = Modifier
                 .fillMaxSize()
+                .onGloballyPositioned { coordinates ->
+                    if (isPlayerExpanded && (fullPlayerContainerBounds == null || !isPlayerExpandTransition)) {
+                        fullPlayerContainerBounds = coordinates.boundsInRoot()
+                    }
+                }
+                .graphicsLayer {
+                    val from = fullPlayerContainerBounds
+                    val to = miniPlayerContainerBounds
+                    val isSharedPlayerTransition = isPlayerCollapseTransition || isPlayerExpandTransition
+                    if ((isSharedPlayerTransition || (!isPlayerExpanded && collapseProgress.value > 0f)) &&
+                        from != null && to != null && from.width > 0f && from.height > 0f) {
+                        val progress = collapseProgress.value.coerceIn(0f, 1f)
+                        translationX = (to.left - from.left) * progress
+                        translationY = (to.top - from.top) * progress
+                        scaleX = 1f + ((to.width / from.width) - 1f) * progress
+                        scaleY = 1f + ((to.height / from.height) - 1f) * progress
+                        transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0f, 0f)
+                        shape = RoundedCornerShape(16.dp * progress)
+                        clip = progress > 0f
+                        alpha = 1f
+                    } else if (isPlayerExpandTransition && from == null) {
+                        // Keep the destination hidden until its full-size bounds are measured.
+                        alpha = 0f
+                    }
+                }
                 .clickable(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null,
@@ -607,7 +713,16 @@ fun AuraMainScreen(viewModel: AuraViewModel) {
                     isVideoLoading = isVideoLoading,
                     livePerformances = livePerformances,
                     isLoadingLivePerformances = isLoadingLivePerformances,
-                    onCollapse = { isPlayerExpanded = false },
+                    onCollapse = collapseFullPlayer,
+                    hideArtworkForPlayerTransition = (isPlayerCollapseTransition || isPlayerExpandTransition) && !isVideoMode,
+                    playerCollapseProgress = if (isPlayerCollapseTransition || isPlayerExpandTransition) {
+                        collapseProgress.value
+                    } else 0f,
+                    onArtworkPositioned = {
+                        if (isPlayerExpanded && (fullPlayerArtworkBounds == null || !isPlayerExpandTransition)) {
+                            fullPlayerArtworkBounds = it
+                        }
+                    },
                     onTogglePlayPause = { AuraPlayerManager.togglePlayPause() },
                     onSeekTo = { AuraPlayerManager.seekToSeconds(it) },
                     onSkipNext = { AuraPlayerManager.skipToNext() },
@@ -626,7 +741,7 @@ fun AuraMainScreen(viewModel: AuraViewModel) {
                         )
                     },
                     onOpenArtist = { artistName ->
-                        isPlayerExpanded = false
+                        collapseFullPlayer()
                         viewModel.openArtistByName(artistName, activeTrack.title, activeTrack.highResArtworkUrl)
                     },
                     isDownloaded = downloads.any { it.videoId == activeTrack.videoId && it.isDownloaded },
@@ -641,6 +756,46 @@ fun AuraMainScreen(viewModel: AuraViewModel) {
                     onToggleRomanized = { viewModel.toggleRomanizedLyrics() }
                 )
             }
+        }
+
+        // The artwork travels independently so it keeps its square shape while the full
+        // player surface folds down into the mini-player's smaller, wider destination.
+        val activeArtwork = currentTrack
+        val artworkStart = fullPlayerArtworkBounds
+        val artworkEnd = miniPlayerArtworkBounds
+        if ((isPlayerCollapseTransition || isPlayerExpandTransition) && !isVideoMode && activeArtwork != null &&
+            artworkStart != null && artworkEnd != null
+        ) {
+            val progress = collapseProgress.value.coerceIn(0f, 1f)
+            val startWidth = artworkStart.width.coerceAtLeast(1f)
+            val startHeight = artworkStart.height.coerceAtLeast(1f)
+            val density = androidx.compose.ui.platform.LocalDensity.current
+            val sourceCorner = if (nowPlayingStyle == com.auramusic.app.domain.model.NowPlayingStyle.LIQUID_GLASS) 22f else 8f
+            val corner = sourceCorner + (8f - sourceCorner) * progress
+
+            AsyncImage(
+                model = activeArtwork.highResArtworkUrl,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .offset(
+                        x = with(density) { artworkStart.left.toDp() },
+                        y = with(density) { artworkStart.top.toDp() }
+                    )
+                    .size(
+                        width = with(density) { startWidth.toDp() },
+                        height = with(density) { startHeight.toDp() }
+                    )
+                    .graphicsLayer {
+                        translationX = (artworkEnd.left - artworkStart.left) * progress
+                        translationY = (artworkEnd.top - artworkStart.top) * progress
+                        scaleX = 1f + ((artworkEnd.width / startWidth) - 1f) * progress
+                        scaleY = 1f + ((artworkEnd.height / startHeight) - 1f) * progress
+                        transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0f, 0f)
+                    }
+                    .clip(RoundedCornerShape(corner.dp))
+                    .zIndex(20f)
+            )
         }
 
         // In-App Update Modal
@@ -675,6 +830,11 @@ private fun AuraMiniPlayer(
     backgroundColor: Color,
     previousTrack: AuraTrack? = null,
     nextTrack: AuraTrack? = null,
+    hideArtworkForTransition: Boolean = false,
+    isPlayerTransition: Boolean = false,
+    collapseProgress: Float = 0f,
+    onArtworkPositioned: (Rect) -> Unit = {},
+    onPlayerBoundsPositioned: (Rect) -> Unit = {},
     onExpand: () -> Unit,
     onTogglePlayPause: () -> Unit,
     onSkipPrevious: () -> Unit,
@@ -707,6 +867,12 @@ private fun AuraMiniPlayer(
             .padding(horizontal = 20.dp)
             .clip(RoundedCornerShape(16.dp))
             .clickable(onClick = onExpand)
+            .onGloballyPositioned { onPlayerBoundsPositioned(it.boundsInRoot()) }
+            .graphicsLayer {
+                alpha = if (isPlayerTransition) {
+                    ((collapseProgress - 0.72f) / 0.28f).coerceIn(0f, 1f)
+                } else 1f
+            }
     ) {
         Column {
             Row(
@@ -724,6 +890,8 @@ private fun AuraMiniPlayer(
                     modifier = Modifier
                         .size(42.dp)
                         .clip(RoundedCornerShape(8.dp))
+                        .onGloballyPositioned { onArtworkPositioned(it.boundsInRoot()) }
+                        .graphicsLayer { alpha = if (hideArtworkForTransition) 0f else 1f }
                 )
 
                 Spacer(modifier = Modifier.width(10.dp))

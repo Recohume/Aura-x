@@ -98,6 +98,7 @@ import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material.icons.rounded.SkipPrevious
 import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material.icons.rounded.StarBorder
+import androidx.compose.material.icons.rounded.Translate
 import androidx.compose.material.icons.rounded.Videocam
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -126,6 +127,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
@@ -194,6 +196,9 @@ fun AuraNowPlayingSheet(
     livePerformances: List<AuraTrack> = emptyList(),
     isLoadingLivePerformances: Boolean = false,
     onCollapse: () -> Unit,
+    hideArtworkForPlayerTransition: Boolean = false,
+    playerCollapseProgress: Float = 0f,
+    onArtworkPositioned: (Rect) -> Unit = {},
     onTogglePlayPause: () -> Unit,
     onSeekTo: (Float) -> Unit,
     onSkipNext: () -> Unit,
@@ -218,6 +223,9 @@ fun AuraNowPlayingSheet(
 ) {
     var isLyricsExpanded by remember { mutableStateOf(false) }
     var lyricsCardBounds by remember { mutableStateOf<Rect?>(null) }
+    var albumArtBounds by remember { mutableStateOf<Rect?>(null) }
+    var lyricsSourceArtBounds by remember { mutableStateOf<Rect?>(null) }
+    var lyricsHeaderArtBounds by remember { mutableStateOf<Rect?>(null) }
     var isQueueSheetVisible by remember { mutableStateOf(false) }
     var isOptionsModalVisible by remember { mutableStateOf(false) }
     var isLivePerformancesModalVisible by remember { mutableStateOf(false) }
@@ -225,6 +233,15 @@ fun AuraNowPlayingSheet(
     var isCreatePlaylistModalVisible by remember { mutableStateOf(false) }
 
     val context = LocalContext.current
+    val openLyrics = {
+        // Freeze the source before the player begins scaling under the lyrics sheet.
+        lyricsSourceArtBounds = albumArtBounds
+        isLyricsExpanded = true
+    }
+    val statusBarHeightPx = remember(context) {
+        val resourceId = context.resources.getIdentifier("status_bar_height", "dimen", "android")
+        if (resourceId != 0) context.resources.getDimensionPixelSize(resourceId) else 0
+    }
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
 
@@ -251,7 +268,13 @@ fun AuraNowPlayingSheet(
     BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFF14151B))
+            .background(
+                lerp(
+                    Color(0xFF14151B),
+                    palette.primary,
+                    playerCollapseProgress.coerceIn(0f, 1f)
+                )
+            )
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
@@ -261,23 +284,43 @@ fun AuraNowPlayingSheet(
         val fullHeightPx = constraints.maxHeight.toFloat()
 
         // Lyrics expansion progress: 0f = collapsed on card, 1f = fully expanded
-        val lyricsExpansionProgress by animateFloatAsState(
+        val lyricsTransitionProgress by animateFloatAsState(
             targetValue = if (isLyricsExpanded) 1f else 0f,
-            animationSpec = spring(
-                dampingRatio = 0.82f,
-                stiffness = Spring.StiffnessMediumLow
+            animationSpec = tween(
+                durationMillis = 660,
+                easing = CubicBezierEasing(0.4f, 0f, 0.2f, 1f)
             ),
-            label = "lyricsExpansionProgress"
+            label = "lyricsTransitionProgress"
+        )
+        // The lyrics sheet, background treatment, and artwork flight share one progress value.
+        // This keeps the player feeling like one full-screen surface instead of revealing a
+        // separate toolbar before the sheet and artwork begin to move.
+        val lyricsExpansionProgress = lyricsTransitionProgress.coerceIn(0f, 1f)
+        // Material-style emphasized easing gives the thumbnail a longer, calmer landing.
+        val coverFlightEasing = remember { CubicBezierEasing(0.4f, 0f, 0.2f, 1f) }
+        val playerBackdropBlur by animateDpAsState(
+            targetValue = if (isLyricsExpanded || lyricsExpansionProgress > 0.12f) 18.dp else 0.dp,
+            animationSpec = tween(
+                durationMillis = 275,
+                easing = CubicBezierEasing(0.4f, 0f, 0.2f, 1f)
+            ),
+            label = "lyricsBackdropBlur"
         )
 
-        // Player view wrapper: stays anchored in place, subtly scaling without alpha transparency
+        // Keep the player under the lyrics transition soft so its preview line and header colors
+        // cannot bleed through the moving card edges.
         Box(
             modifier = Modifier
                 .fillMaxSize()
+                .blur(playerBackdropBlur)
                 .graphicsLayer {
                     val scale = 0.94f + (0.06f * (1f - lyricsExpansionProgress))
                     scaleX = scale
                     scaleY = scale
+                    // Keep the player surface solid while its artwork flies to the mini
+                    // player. Curtain away the full-size controls before the mini controls
+                    // resolve, so the two layouts never appear as translucent duplicates.
+                    alpha = 1f - (playerCollapseProgress.coerceIn(0f, 1f) / 0.58f).coerceIn(0f, 1f)
                 }
         ) {
             Crossfade(
@@ -299,6 +342,9 @@ fun AuraNowPlayingSheet(
                             isFavorite = isFavorite,
                             isShuffleEnabled = isShuffleEnabled,
                             lyricsExpansionProgress = lyricsExpansionProgress,
+                            hideArtworkForLyricsTransition = !isVideoMode &&
+                                ((lyricsExpansionProgress > 0.001f && lyricsHeaderArtBounds != null) ||
+                                    hideArtworkForPlayerTransition),
                             isVideoMode = isVideoMode,
                             isVideoLoading = isVideoLoading,
                             onCollapse = onCollapse,
@@ -314,9 +360,13 @@ fun AuraNowPlayingSheet(
                                 onOpenArtist(track.artist)
                             },
                             onOptionsClick = { isOptionsModalVisible = true },
-                            onOpenLyrics = { isLyricsExpanded = true },
+                            onOpenLyrics = openLyrics,
                             onOpenQueue = { isQueueSheetVisible = true },
-                            onCardPositioned = { lyricsCardBounds = it }
+                            onCardPositioned = { lyricsCardBounds = it },
+                            onArtworkPositioned = {
+                                albumArtBounds = it
+                                onArtworkPositioned(it)
+                            }
                         )
                     }
                     NowPlayingStyle.LIQUID_GLASS -> {
@@ -328,6 +378,10 @@ fun AuraNowPlayingSheet(
                             durationSec = durationSec,
                             isFavorite = isFavorite,
                             isShuffleEnabled = isShuffleEnabled,
+                            lyricsExpansionProgress = lyricsExpansionProgress,
+                            hideArtworkForLyricsTransition = !isVideoMode &&
+                                ((lyricsExpansionProgress > 0.001f && lyricsHeaderArtBounds != null) ||
+                                    hideArtworkForPlayerTransition),
                             isVideoMode = isVideoMode,
                             isVideoLoading = isVideoLoading,
                             onCollapse = onCollapse,
@@ -343,9 +397,13 @@ fun AuraNowPlayingSheet(
                                 onOpenArtist(track.artist)
                             },
                             onOptionsClick = { isOptionsModalVisible = true },
-                            onOpenLyrics = { isLyricsExpanded = true },
+                            onOpenLyrics = openLyrics,
                             onOpenQueue = { isQueueSheetVisible = true },
-                            onCardPositioned = { lyricsCardBounds = it }
+                            onCardPositioned = { lyricsCardBounds = it },
+                            onArtworkPositioned = {
+                                albumArtBounds = it
+                                onArtworkPositioned(it)
+                            }
                         )
                     }
                 }
@@ -367,7 +425,7 @@ fun AuraNowPlayingSheet(
         // Automatically tracks the exact physical position, width, and height of the lyrics card.
         // Opens by expanding fluidly outwards from the card's exact geometry.
         // Closes by morphing and physically traveling back into its original slot on the screen!
-        if (lyricsExpansionProgress > 0.001f) {
+        if (lyricsTransitionProgress > 0.001f) {
             val fullWidthPx = constraints.maxWidth.toFloat()
             val density = LocalDensity.current
 
@@ -375,25 +433,27 @@ fun AuraNowPlayingSheet(
             val fallbackWidth = fullWidthPx - (fallbackMargin * 2f)
             val fallbackHeight = with(density) { 280.dp.toPx() }
             val fallbackTop = fullHeightPx - with(density) { 340.dp.toPx() }
+            val compactHeaderBottomPx = statusBarHeightPx.toFloat() +
+                with(density) { 66.dp.toPx() }
 
             val startLeft = lyricsCardBounds?.left ?: fallbackMargin
             val startTop = lyricsCardBounds?.top ?: fallbackTop
             val startWidth = lyricsCardBounds?.width?.takeIf { it > 10f } ?: fallbackWidth
             val startHeight = lyricsCardBounds?.height?.takeIf { it > 10f } ?: fallbackHeight
 
-            // Spring overshoots past 1.0f on arrival; clamp progress strictly for geometry and corner radii
             val clampedProgress = lyricsExpansionProgress.coerceIn(0f, 1f)
 
             val currentLeft = lerpFloat(startLeft, 0f, clampedProgress)
-            val currentTop = lerpFloat(startTop, 0f, clampedProgress)
+            val currentTop = lerpFloat(startTop, compactHeaderBottomPx, clampedProgress)
             val currentWidth = lerpFloat(startWidth, fullWidthPx, clampedProgress).coerceAtLeast(10f)
-            val currentHeight = lerpFloat(startHeight, fullHeightPx, clampedProgress).coerceAtLeast(10f)
+            val lyricsAreaHeightPx = (fullHeightPx - compactHeaderBottomPx).coerceAtLeast(10f)
+            val currentHeight = lerpFloat(startHeight, lyricsAreaHeightPx, clampedProgress).coerceAtLeast(10f)
 
             val currentLeftDp = with(density) { currentLeft.toDp() }
             val currentTopDp = with(density) { currentTop.toDp() }
             val currentWidthDp = with(density) { currentWidth.toDp() }
             val currentHeightDp = with(density) { currentHeight.toDp() }
-            val currentCornerRadius = lerpFloat(20f, 0f, clampedProgress).coerceIn(0f, 20f)
+            val currentCornerRadius = lerpFloat(20f, 18f, clampedProgress).coerceIn(0f, 20f)
             val currentElevation = (16.dp * (1f - clampedProgress)).coerceAtLeast(0.dp)
 
             Box(
@@ -420,16 +480,14 @@ fun AuraNowPlayingSheet(
                     lyricsOffsetMs = lyricsOffsetMs,
                     showRomanized = showRomanized,
                     palette = palette,
-                    showPlayerControls = isLyricsExpanded && lyricsExpansionProgress >= 0.90f,
+                    showPlayerControls = lyricsExpansionProgress >= 0.38f,
                     lyricsExpansionProgress = lyricsExpansionProgress,
-                    onClose = { isLyricsExpanded = false },
                     onSeekTo = onSeekTo,
                     onTogglePlayPause = onTogglePlayPause,
                     onSkipPrevious = onSkipPrevious,
                     onSkipNext = onSkipNext,
                     onOpenQueue = { isQueueSheetVisible = true },
-                    onAdjustLyricsOffset = onAdjustLyricsOffset,
-                    onToggleRomanized = onToggleRomanized
+                    onAdjustLyricsOffset = onAdjustLyricsOffset
                 )
 
                 // Smooth seamless card preview blend when close to the bottom slot
@@ -518,6 +576,75 @@ fun AuraNowPlayingSheet(
                         }
                     }
                 }
+            }
+
+            // Draw the cover flight above the expanding card so it can travel from the player artwork
+            // into the compact header without being clipped by the lyrics card's rounded bounds.
+            val sourceArt = lyricsSourceArtBounds.takeIf { !isVideoMode }
+            val headerArt = lyricsHeaderArtBounds
+            // Let the sheet's advancing top edge lead the cover flight. The cover starts moving
+            // shortly before the sheet reaches its lower edge, which makes the card feel like it
+            // is lifting the artwork into the compact header instead of the image moving alone.
+            val coverContactProgress = sourceArt?.let { art ->
+                ((startTop - art.bottom) / (startTop - compactHeaderBottomPx).coerceAtLeast(1f))
+                    .coerceIn(0f, 0.62f)
+            } ?: 0f
+            val coverPushStartProgress = (coverContactProgress - 0.12f).coerceAtLeast(0f)
+            val coverLinearProgress =
+                ((clampedProgress - coverPushStartProgress) / (1f - coverPushStartProgress))
+                    .coerceIn(0f, 1f)
+            // Start responsively, then decelerate into the compact header for a soft landing.
+            val coverFlightProgress = coverFlightEasing.transform(coverLinearProgress)
+            val sourceCornerRadius = if (currentStyle == NowPlayingStyle.LIQUID_GLASS) 22f else 8f
+            val coverCornerRadius = lerpFloat(sourceCornerRadius, 4f, coverFlightProgress).dp
+
+            FullScreenLyricsCompactHeader(
+                modifier = Modifier.align(Alignment.TopCenter),
+                track = track,
+                isPlaying = isPlaying,
+                isBuffering = isBuffering,
+                showRomanized = showRomanized,
+                artworkExpansionProgress = coverFlightProgress,
+                statusBarHeightPx = statusBarHeightPx,
+                headerColor = lerp(Color.Black, palette.primary, 0.08f),
+                onArtworkPositioned = { lyricsHeaderArtBounds = it },
+                onClose = { isLyricsExpanded = false },
+                onTogglePlayPause = onTogglePlayPause,
+                onToggleRomanized = onToggleRomanized
+            )
+            if (coverFlightProgress < 1f && sourceArt != null && headerArt != null) {
+                val sourceWidth = sourceArt.width.coerceAtLeast(1f)
+                val sourceHeight = sourceArt.height.coerceAtLeast(1f)
+                val flightX = (headerArt.left - sourceArt.left) * coverFlightProgress
+                val flightY = (headerArt.top - sourceArt.top) * coverFlightProgress
+                val flightScaleX = lerpFloat(1f, headerArt.width / sourceWidth, coverFlightProgress)
+                val flightScaleY = lerpFloat(1f, headerArt.height / sourceHeight, coverFlightProgress)
+                val headerHandoff = ((coverFlightProgress - 0.88f) / 0.12f).coerceIn(0f, 1f)
+                val flightAlpha = 1f - headerHandoff
+                AsyncImage(
+                    model = track.highResArtworkUrl,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .offset(
+                            x = with(density) { sourceArt.left.toDp() },
+                            y = with(density) { sourceArt.top.toDp() }
+                        )
+                        .size(
+                            width = with(density) { sourceWidth.toDp() },
+                            height = with(density) { sourceHeight.toDp() }
+                        )
+                        .graphicsLayer {
+                            translationX = flightX
+                            translationY = flightY
+                            scaleX = flightScaleX
+                            scaleY = flightScaleY
+                            alpha = flightAlpha
+                            transformOrigin = TransformOrigin(0f, 0f)
+                        }
+                        .clip(RoundedCornerShape(coverCornerRadius))
+                        .zIndex(2f)
+                )
             }
         }
 
@@ -789,7 +916,7 @@ private fun NowPlayingOptionsModal(
             // 2. Live Performances & Alternate Videos
             NowPlayingModalOptionRow(
                 icon = Icons.Rounded.LiveTv,
-                label = "Live Performances & Alternate Versions",
+                label = "More Videos",
                 onClick = onOpenLivePerformances
             )
 
@@ -1239,6 +1366,7 @@ private fun LiquidGlassPlayerView(
     isFavorite: Boolean,
     isShuffleEnabled: Boolean,
     lyricsExpansionProgress: Float = 0f,
+    hideArtworkForLyricsTransition: Boolean = false,
     isVideoMode: Boolean = false,
     isVideoLoading: Boolean = false,
     onCollapse: () -> Unit,
@@ -1253,7 +1381,8 @@ private fun LiquidGlassPlayerView(
     onOptionsClick: () -> Unit,
     onOpenLyrics: () -> Unit,
     onOpenQueue: () -> Unit,
-    onCardPositioned: (Rect) -> Unit = {}
+    onCardPositioned: (Rect) -> Unit = {},
+    onArtworkPositioned: (Rect) -> Unit = {}
 ) {
     val context = LocalContext.current
     val audioManager = remember { context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager }
@@ -1399,14 +1528,17 @@ private fun LiquidGlassPlayerView(
                     Box(
                         modifier = Modifier
                             .size(artSize)
-                            .clip(RoundedCornerShape(22.dp)),
+                            .clip(RoundedCornerShape(22.dp))
+                            .onGloballyPositioned { onArtworkPositioned(it.boundsInRoot()) },
                         contentAlignment = Alignment.Center
                     ) {
                         AsyncImage(
                             model = track.highResArtworkUrl,
                             contentDescription = track.title,
                             contentScale = ContentScale.Crop,
-                            modifier = Modifier.fillMaxSize()
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .graphicsLayer { alpha = if (hideArtworkForLyricsTransition) 0f else 1f }
                         )
 
                         // Soft bottom gradient mask on top of artwork for liquid blend into controls
@@ -1729,6 +1861,7 @@ private fun SpotifyEncorePlayerView(
     isFavorite: Boolean,
     isShuffleEnabled: Boolean,
     lyricsExpansionProgress: Float = 0f,
+    hideArtworkForLyricsTransition: Boolean = false,
     isVideoMode: Boolean = false,
     isVideoLoading: Boolean = false,
     onCollapse: () -> Unit,
@@ -1743,7 +1876,8 @@ private fun SpotifyEncorePlayerView(
     onOptionsClick: () -> Unit,
     onOpenLyrics: () -> Unit,
     onOpenQueue: () -> Unit,
-    onCardPositioned: (Rect) -> Unit = {}
+    onCardPositioned: (Rect) -> Unit = {},
+    onArtworkPositioned: (Rect) -> Unit = {}
 ) {
     val animatedTopColor by animateColorAsState(
         targetValue = palette.backgroundTop.copy(alpha = 0.65f),
@@ -1876,14 +2010,17 @@ private fun SpotifyEncorePlayerView(
                             .padding(horizontal = 24.dp)
                             .aspectRatio(1f)
                             .clip(RoundedCornerShape(8.dp))
-                            .background(Color(0xFF242424)),
+                            .background(Color(0xFF242424))
+                            .onGloballyPositioned { onArtworkPositioned(it.boundsInRoot()) },
                         contentAlignment = Alignment.Center
                     ) {
                         AsyncImage(
                             model = track.highResArtworkUrl,
                             contentDescription = track.title,
                             contentScale = ContentScale.Crop,
-                            modifier = Modifier.fillMaxSize()
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .graphicsLayer { alpha = if (hideArtworkForLyricsTransition) 0f else 1f }
                         )
                     }
                 }
@@ -2232,6 +2369,156 @@ private fun SpotifyEncorePlayerView(
  * Full Screen Song Lyrics View with track controls at bottom,
  * 100% solid, fully opaque background (no transparency).
  */
+@Composable
+private fun FullScreenLyricsCompactHeader(
+    modifier: Modifier = Modifier,
+    track: AuraTrack,
+    isPlaying: Boolean,
+    isBuffering: Boolean,
+    showRomanized: Boolean,
+    artworkExpansionProgress: Float,
+    statusBarHeightPx: Int,
+    headerColor: Color,
+    onArtworkPositioned: (Rect) -> Unit,
+    onClose: () -> Unit,
+    onTogglePlayPause: () -> Unit,
+    onToggleRomanized: () -> Unit
+) {
+    val animatedHeaderColor by animateColorAsState(
+        targetValue = headerColor,
+        animationSpec = tween(400),
+        label = "lyricsHeaderDarkColor"
+    )
+    val headerArtworkAlpha = ((artworkExpansionProgress - 0.88f) / 0.12f).coerceIn(0f, 1f)
+    // Keep the full player's own backdrop visible until the moving cover reaches its target.
+    // Only then resolve the compact tint and controls, together, over a short fade.
+    val compactContentProgress by animateFloatAsState(
+        targetValue = if (artworkExpansionProgress >= 0.985f) 1f else 0f,
+        animationSpec = tween(190, easing = CubicBezierEasing(0.2f, 0f, 0f, 1f)),
+        label = "lyricsCompactContentReveal"
+    )
+    val headerHeight = with(LocalDensity.current) { statusBarHeightPx.toDp() } + 66.dp
+
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(headerHeight)
+            .clipToBounds()
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                // Transparent during the cover flight: the full player backdrop remains continuous.
+                .background(animatedHeaderColor.copy(alpha = compactContentProgress))
+                .pointerInput(Unit) {
+                    detectVerticalDragGestures { _, dragAmount ->
+                        if (dragAmount > 16f) onClose()
+                    }
+                }
+        ) {
+            // Status-bar area and header share the same dark palette tint.
+            Spacer(
+                modifier = Modifier.height(
+                    with(LocalDensity.current) { statusBarHeightPx.toDp() }
+                )
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(58.dp)
+                    .padding(horizontal = 8.dp, vertical = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                AsyncImage(
+                    model = track.highResArtworkUrl,
+                    contentDescription = "Close lyrics",
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .size(46.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                        .graphicsLayer { alpha = headerArtworkAlpha }
+                        .onGloballyPositioned { onArtworkPositioned(it.boundsInRoot()) }
+                        .clickable(onClick = onClose)
+                )
+
+                Column(
+                    horizontalAlignment = Alignment.Start,
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(start = 4.dp, end = 2.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                        .graphicsLayer { alpha = compactContentProgress }
+                        .clickable(onClick = onClose)
+                ) {
+                    Text(
+                        text = track.title,
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Medium,
+                        color = Color.White,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = track.artist,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color.White.copy(alpha = 0.72f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .graphicsLayer { alpha = compactContentProgress }
+                        .clickable(onClick = onToggleRomanized)
+                        .padding(horizontal = 6.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(3.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Translate,
+                        contentDescription = if (showRomanized) "Romaji lyrics" else "Original lyrics",
+                        tint = if (showRomanized) AuraPlayGreen else Color.White.copy(alpha = 0.82f),
+                        modifier = Modifier.size(17.dp)
+                    )
+                    Text(
+                        text = if (showRomanized) "Romaji" else "Original",
+                        color = if (showRomanized) AuraPlayGreen else Color.White.copy(alpha = 0.82f),
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
+                IconButton(
+                    onClick = onTogglePlayPause,
+                    modifier = Modifier
+                        .size(42.dp)
+                        .graphicsLayer { alpha = compactContentProgress }
+                ) {
+                    if (isBuffering) {
+                        CircularProgressIndicator(
+                            color = Color.White,
+                            strokeWidth = 2.dp,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    } else {
+                        Icon(
+                            imageVector = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                            contentDescription = if (isPlaying) "Pause" else "Play",
+                            tint = Color.White,
+                            modifier = Modifier.size(25.dp)
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun FullScreenSongLyricsView(
@@ -2246,14 +2533,12 @@ private fun FullScreenSongLyricsView(
     palette: AuraPalette,
     showPlayerControls: Boolean = true,
     lyricsExpansionProgress: Float = 1f,
-    onClose: () -> Unit,
     onSeekTo: (Float) -> Unit,
     onTogglePlayPause: () -> Unit,
     onSkipPrevious: () -> Unit,
     onSkipNext: () -> Unit,
     onOpenQueue: () -> Unit = {},
-    onAdjustLyricsOffset: (Int) -> Unit,
-    onToggleRomanized: () -> Unit
+    onAdjustLyricsOffset: (Int) -> Unit
 ) {
     val lines = lyrics?.syncedLines ?: emptyList()
     val activeIdx = lines.indexOfLast { positionSec >= it.timeSec }.coerceAtLeast(0)
@@ -2266,7 +2551,6 @@ private fun FullScreenSongLyricsView(
         animationSpec = tween(400),
         label = "lyricsSolidCoverBg"
     )
-
     LaunchedEffect(activeIdx) {
         if (lines.isNotEmpty() && activeIdx >= 0) {
             listState.animateScrollToItem((activeIdx - 1).coerceAtLeast(0))
@@ -2282,67 +2566,8 @@ private fun FullScreenSongLyricsView(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .statusBarsPadding()
                 .navigationBarsPadding()
         ) {
-            // Top Bar with tap-to-close & swipe-down-to-close gestures
-            // Smoothly crossfades with Card preview header below 0.35f progress
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .graphicsLayer {
-                        alpha = if (lyricsExpansionProgress < 0.35f) 0f else ((lyricsExpansionProgress - 0.35f) / 0.35f).coerceIn(0f, 1f)
-                    }
-                    .pointerInput(Unit) {
-                        detectVerticalDragGestures { _, dragAmount ->
-                            if (dragAmount > 16f) {
-                                onClose()
-                            }
-                        }
-                    }
-                    .padding(horizontal = 20.dp, vertical = 12.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                IconButton(onClick = onClose) {
-                    Icon(
-                        imageVector = Icons.Rounded.Close,
-                        contentDescription = "Close Lyrics",
-                        tint = Color.White
-                    )
-                }
-
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier.weight(1f).padding(horizontal = 12.dp)
-                ) {
-                    Text(
-                        text = track.title,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Text(
-                        text = track.artist,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = Color.White.copy(alpha = 0.7f),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-
-                IconButton(onClick = onToggleRomanized) {
-                    Text(
-                        text = if (showRomanized) "ROM" else "ORIG",
-                        color = if (showRomanized) AuraPlayGreen else Color.White,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-            }
-
             // Synced Lyrics List
             Box(
                 modifier = Modifier
@@ -2369,7 +2594,7 @@ private fun FullScreenSongLyricsView(
                 } else {
                     LazyColumn(
                         state = listState,
-                        contentPadding = PaddingValues(start = 24.dp, end = 24.dp, top = 140.dp, bottom = 240.dp),
+                        contentPadding = PaddingValues(start = 24.dp, end = 24.dp, top = 112.dp, bottom = 260.dp),
                         verticalArrangement = Arrangement.spacedBy(16.dp),
                         modifier = Modifier.fillMaxSize()
                     ) {
@@ -2418,6 +2643,33 @@ private fun FullScreenSongLyricsView(
                         }
                     }
                 }
+
+                // Soft, palette-matched boundaries keep scrolling lyrics from appearing
+                // clipped against the rounded sheet edge or the controls below.
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .fillMaxWidth()
+                        .height(112.dp)
+                        .background(
+                            Brush.verticalGradient(
+                                colors = listOf(animatedCoverColor, animatedCoverColor.copy(alpha = 0f))
+                            )
+                        )
+                        .blur(10.dp)
+                )
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .height(92.dp)
+                        .background(
+                            Brush.verticalGradient(
+                                colors = listOf(animatedCoverColor.copy(alpha = 0f), animatedCoverColor)
+                            )
+                        )
+                        .blur(10.dp)
+                )
             }
 
             // Compact Track UI Controls inside Full Lyrics View with CompactPointSlider
@@ -2429,7 +2681,7 @@ private fun FullScreenSongLyricsView(
                     modifier = Modifier
                         .fillMaxWidth()
                         .graphicsLayer {
-                            alpha = ((lyricsExpansionProgress - 0.90f) / 0.10f).coerceIn(0f, 1f)
+                            alpha = ((lyricsExpansionProgress - 0.38f) / 0.42f).coerceIn(0f, 1f)
                         }
                 ) {
                     Column(

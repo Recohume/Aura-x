@@ -41,6 +41,7 @@
             android:configChanges="keyboardHidden|screenSize|screenLayout|smallestScreenSize"
             android:exported="true"
             android:launchMode="singleTask"
+            android:screenOrientation="portrait"
             android:theme="@style/Theme.AuraMusic">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

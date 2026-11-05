@@ -4,6 +4,7 @@ import com.auramusic.app.core.extractor.SimpMusicExtractorEngine
 import com.auramusic.app.domain.model.LyricLine
 import com.auramusic.app.domain.model.LyricWord
 import com.auramusic.app.domain.model.LyricsData
+import com.atilika.kuromoji.ipadic.Tokenizer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.Request
@@ -87,45 +88,141 @@ object SimpMusicLyricsRepository {
 
     private fun fetchFromLrcLib(videoId: String, title: String, artist: String, durationSeconds: Int): LyricsData? {
         return try {
-            val cleanTitle = title.replace(Regex("\\(.*?\\)|\\[.*?]"), "").trim()
-            val cleanArtist = artist.split(",", "ft.", "feat.").firstOrNull()?.trim() ?: artist
-            val query = URLEncoder.encode("$cleanTitle $cleanArtist", "UTF-8")
-            val req = Request.Builder()
-                .url("https://lrclib.net/api/search?q=$query")
-                .header("User-Agent", "AuraMusicKotlin/1.0.0")
-                .build()
+            val cleanTitle = normalizeLyricsTitle(title, artist)
+            val cleanArtist = normalizeLyricsArtist(artist)
+            if (cleanTitle.isBlank() || cleanArtist.isBlank()) return null
 
-            SimpMusicExtractorEngine.httpClient.newCall(req).execute().use { resp ->
-                if (!resp.isSuccessful) return null
-                val arr = JSONArray(resp.body?.string() ?: return null)
-                if (arr.length() == 0) return null
-
-                var chosen = arr.getJSONObject(0)
-                for (i in 0 until arr.length()) {
-                    val candidate = arr.getJSONObject(i)
-                    if (candidate.optString("syncedLyrics").isNotBlank()) {
-                        chosen = candidate
-                        break
-                    }
-                }
-
-                val synced = unescapeLyricsHtml(chosen.optString("syncedLyrics"))
-                val plain = unescapeLyricsHtml(chosen.optString("plainLyrics"))
-                val lines = if (synced.isNotBlank()) parseLrcWithRichWords(synced) else emptyList()
-                if (lines.isEmpty() && plain.isBlank()) return null
-
-                LyricsData(
-                    videoId = videoId,
-                    plainLyrics = plain.ifBlank { lines.joinToString("\n") { it.text } },
-                    syncedLines = lines,
-                    source = "LRCLIB Direct",
-                    hasRomanization = lines.any { !it.romanizedText.isNullOrBlank() }
-                )
+            val params = linkedMapOf(
+                "track_name" to cleanTitle,
+                "artist_name" to cleanArtist
+            ).apply {
+                if (durationSeconds > 0) put("duration", durationSeconds.toString())
             }
+            // LRCLIB's signature endpoint uses track + artist + duration for precise matching.
+            fetchLrcLibRecord("https://lrclib.net/api/get?${encodeQuery(params)}")?.let { record ->
+                return record.toLyricsData(videoId, "LRCLIB Exact Match")
+            }
+
+            // Search with structured metadata first. Some YouTube uploads use channel names or
+            // decorated titles, so also retry the normalized title without trusting the uploader.
+            val queries = listOf(
+                mapOf("track_name" to cleanTitle, "artist_name" to cleanArtist),
+                mapOf("track_name" to cleanTitle),
+                mapOf("q" to "$cleanArtist $cleanTitle"),
+                mapOf("q" to cleanTitle)
+            ).distinct()
+
+            val candidates = queries.flatMap { queryParams ->
+                fetchLrcLibSearch(queryParams)
+            }.distinctBy { it.optString("id").ifBlank { it.optString("trackName") + it.optString("artistName") } }
+
+            val chosen = candidates
+                .map { it to lyricsMatchScore(it, cleanTitle, cleanArtist, durationSeconds) }
+                .filter { (_, score) -> score > 0 }
+                .maxByOrNull { (_, score) -> score }
+                ?.first ?: return null
+
+            chosen.toLyricsData(videoId, "LRCLIB Search")
         } catch (e: Exception) {
             null
         }
     }
+
+    private fun fetchLrcLibRecord(url: String): JSONObject? = try {
+        val req = Request.Builder().url(url).header("User-Agent", "AuraMusicKotlin/1.0.0").build()
+        SimpMusicExtractorEngine.httpClient.newCall(req).execute().use { resp ->
+            if (!resp.isSuccessful) null else JSONObject(resp.body?.string() ?: return null)
+        }
+    } catch (_: Exception) {
+        null
+    }
+
+    private fun fetchLrcLibSearch(params: Map<String, String>): List<JSONObject> = try {
+        val req = Request.Builder()
+            .url("https://lrclib.net/api/search?${encodeQuery(params)}")
+            .header("User-Agent", "AuraMusicKotlin/1.0.0")
+            .build()
+        SimpMusicExtractorEngine.httpClient.newCall(req).execute().use { resp ->
+            if (!resp.isSuccessful) return emptyList()
+            val array = JSONArray(resp.body?.string() ?: return emptyList())
+            List(array.length()) { index -> array.getJSONObject(index) }
+        }
+    } catch (_: Exception) {
+        emptyList()
+    }
+
+    private fun JSONObject.toLyricsData(videoId: String, sourceName: String): LyricsData? {
+        val synced = unescapeLyricsHtml(optString("syncedLyrics").takeUnless { it == "null" }.orEmpty())
+        val plain = unescapeLyricsHtml(optString("plainLyrics").takeUnless { it == "null" }.orEmpty())
+        val lines = if (synced.isNotBlank()) parseLrcWithRichWords(synced) else emptyList()
+        if (lines.isEmpty() && plain.isBlank()) return null
+        return LyricsData(
+            videoId = videoId,
+            plainLyrics = plain.ifBlank { lines.joinToString("\n") { it.text } },
+            syncedLines = lines,
+            source = sourceName,
+            hasRomanization = lines.any { !it.romanizedText.isNullOrBlank() }
+        )
+    }
+
+    private fun normalizeLyricsTitle(raw: String, artist: String): String {
+        var title = raw
+            .replace(Regex("(?i)\\[[^]]*(official|music video|lyrics?|audio|visuali[sz]er|4k|hd)[^]]*]"), " ")
+            .replace(Regex("(?i)\\([^)]*(official|music video|lyrics?|audio|visuali[sz]er|4k|hd|from\\s+|soundtrack|kpop demon hunters)[^)]*\\)"), " ")
+            .replace(Regex("(?i)\\b(official\\s+(music\\s+)?video|official\\s+audio|lyrics?\\s+video|lyrics?|audio|visuali[sz]er|4k|hd)\\b"), " ")
+        normalizeLyricsArtist(artist).split(",", "&", " feat. ").map(String::trim)
+            .filter { it.length >= 3 }
+            .forEach { creditedName ->
+                title = title.replace(
+                    Regex("(?i)\\s*[-|•:]\\s*${Regex.escape(creditedName)}\\s*$"),
+                    ""
+                )
+            }
+        return title
+            .replace(Regex("\\s+[-|•:]\\s*$"), "")
+            .replace(Regex("\\s+"), " ")
+            .trim(' ', '-', '|', '•', ':')
+    }
+
+    private fun normalizeLyricsArtist(raw: String): String = raw
+        .replace(Regex("(?i)\\s*[-|•:]\\s*(official|topic|vevo|music|channel).*$"), "")
+        .replace(Regex("(?i)\\s+(ft\\.?|feat\\.?|featuring)\\s+.*$"), "")
+        .replace(Regex("\\s+"), " ")
+        .trim(' ', '-', '|', '•', ':')
+
+    private fun encodeQuery(params: Map<String, String>): String = params.entries.joinToString("&") {
+        "${URLEncoder.encode(it.key, "UTF-8")}=${URLEncoder.encode(it.value, "UTF-8")}"
+    }
+
+    private fun lyricsMatchScore(candidate: JSONObject, title: String, artist: String, duration: Int): Int {
+        val candidateTitle = normalizeForLyricsMatch(candidate.optString("trackName").ifBlank { candidate.optString("name") })
+        val candidateArtist = normalizeForLyricsMatch(candidate.optString("artistName"))
+        val expectedTitle = normalizeForLyricsMatch(title)
+        val expectedArtist = normalizeForLyricsMatch(artist)
+        if (candidateTitle.isBlank() || expectedTitle.isBlank()) return 0
+
+        var score = when {
+            candidateTitle == expectedTitle -> 100
+            candidateTitle.contains(expectedTitle) || expectedTitle.contains(candidateTitle) -> 55
+            else -> 0
+        }
+        if (score == 0) return 0
+        if (candidateArtist == expectedArtist) score += 35
+        else if (candidateArtist.contains(expectedArtist) || expectedArtist.contains(candidateArtist)) score += 18
+
+        val candidateDuration = candidate.optInt("duration", 0)
+        if (duration > 0 && candidateDuration > 0) {
+            val delta = kotlin.math.abs(candidateDuration - duration)
+            if (delta <= 2) score += 25 else if (delta <= 8) score += 8 else score -= 20
+        }
+        if (candidate.optString("syncedLyrics").isNotBlank()) score += 5
+        return score
+    }
+
+    private fun normalizeForLyricsMatch(text: String): String = text
+        .lowercase()
+        .replace(Regex("(?i)\\b(official|music|video|audio|lyrics?|visuali[sz]er|feat|featuring|ft)\\b"), " ")
+        .replace(Regex("[^\\p{L}\\p{N}]"), "")
 
     private fun parseLrcWithRichWords(lrcText: String): List<LyricLine> {
         val lineRegex = Regex("^\\[(\\d{1,2}):(\\d{2})(?:\\.(\\d{1,3}))?](.*)$")
@@ -243,13 +340,30 @@ object SimpMusicLyricsRepository {
         return res
     }
 
-    /**
-     * Lightweight Romanizer for Korean Hangul, Japanese Kana, and Cyrillic lyrics.
-     */
-    private fun romanizeIfNonLatin(text: String): String? {
-        var hasNonLatin = false
-        val sb = StringBuilder()
+    /** Kuromoji is initialized on the lyrics IO dispatcher, not during app startup. */
+    private val japaneseTokenizer: Tokenizer by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { Tokenizer() }
 
+    private fun romanizeIfNonLatin(text: String): String? {
+        if (text.isBlank()) return null
+
+        // Kana reliably identifies Japanese text. Han-only lines are ambiguous with Chinese,
+        // so leave those alone rather than assigning them Japanese readings without context.
+        val hasJapanese = text.any(::isJapaneseKana)
+        if (hasJapanese) {
+            val reading = runCatching {
+                buildString {
+                    japaneseTokenizer.tokenize(text).forEach { token ->
+                        val tokenReading = token.reading
+                        // Unknown words and Latin fragments have no dictionary reading.
+                        append(if (tokenReading.isNullOrBlank() || tokenReading == "*") token.surface else tokenReading)
+                    }
+                }
+            }.getOrNull() ?: text
+
+            return romanizeKana(reading).takeIf { it.isNotBlank() && it != text }
+        }
+
+        // Keep the existing Hangul romanization behavior.
         val initials = arrayOf(
             "g", "kk", "n", "d", "tt", "r", "m", "b", "pp", "s",
             "ss", "", "j", "jj", "ch", "k", "t", "p", "h"
@@ -263,29 +377,87 @@ object SimpMusicLyricsRepository {
             "lb", "ls", "lt", "lp", "lh", "m", "p", "bs", "t", "t", "ng",
             "t", "t", "k", "t", "p", "t"
         )
-
-        for (ch in text) {
-            val code = ch.code
-            when {
-                // Korean Hangul Syllables (AC00..D7A3)
-                code in 0xAC00..0xD7A3 -> {
-                    hasNonLatin = true
+        var hasHangul = false
+        val hangul = buildString {
+            text.forEach { ch ->
+                val code = ch.code
+                if (code in 0xAC00..0xD7A3) {
+                    hasHangul = true
                     val index = code - 0xAC00
                     val initial = index / (21 * 28)
                     val medial = (index % (21 * 28)) / 28
-                    val finalIdx = index % 28
-                    sb.append(initials[initial]).append(medials[medial]).append(finals[finalIdx])
+                    val finalIndex = index % 28
+                    append(initials[initial]).append(medials[medial]).append(finals[finalIndex])
+                } else {
+                    append(ch)
                 }
-                // Hiragana (3040..309F) or Katakana (30A0..30FF)
-                code in 0x3040..0x30FF -> {
-                    hasNonLatin = true
-                    sb.append(KANA_MAP[ch] ?: ch)
-                }
-                else -> sb.append(ch)
             }
         }
-        return if (hasNonLatin) sb.toString() else null
+        return hangul.takeIf { hasHangul }
     }
+
+    private fun isJapaneseKana(ch: Char): Boolean {
+        val code = ch.code
+        return code in 0x3040..0x30FF
+    }
+
+    /** Kana → Hepburn romaji, including contracted sounds, doubled consonants and long vowels. */
+    private fun romanizeKana(text: String): String {
+        val kana = java.text.Normalizer.normalize(text, java.text.Normalizer.Form.NFKC)
+            .map { ch -> if (ch in 'ァ'..'ヶ') (ch.code - 0x60).toChar() else ch }
+            .joinToString("")
+        val output = StringBuilder()
+        var index = 0
+        while (index < kana.length) {
+            val ch = kana[index]
+            if (ch == 'っ') {
+                val next = romanizeKanaUnit(kana, index + 1)
+                if (!next.isNullOrEmpty() && next[0] !in "aiueo") output.append(next[0])
+                index++
+                continue
+            }
+            if (ch == 'ー') {
+                output.lastOrNull()?.takeIf { it in "aiueo" }?.let(output::append)
+                index++
+                continue
+            }
+
+            val pair = if (index + 1 < kana.length) kana.substring(index, index + 2) else ""
+            val contracted = YOUON[pair]
+            if (contracted != null) {
+                output.append(contracted)
+                index += 2
+                continue
+            }
+            output.append(KANA_MAP[ch] ?: ch)
+            index++
+        }
+        return output.toString()
+    }
+
+    private fun romanizeKanaUnit(kana: String, index: Int): String? {
+        if (index >= kana.length) return null
+        val pair = if (index + 1 < kana.length) kana.substring(index, index + 2) else ""
+        return YOUON[pair] ?: KANA_MAP[kana[index]]
+    }
+
+    private val YOUON = mapOf(
+        "きゃ" to "kya", "きゅ" to "kyu", "きょ" to "kyo",
+        "しゃ" to "sha", "しゅ" to "shu", "しょ" to "sho",
+        "ちゃ" to "cha", "ちゅ" to "chu", "ちょ" to "cho",
+        "にゃ" to "nya", "にゅ" to "nyu", "にょ" to "nyo",
+        "ひゃ" to "hya", "ひゅ" to "hyu", "ひょ" to "hyo",
+        "みゃ" to "mya", "みゅ" to "myu", "みょ" to "myo",
+        "りゃ" to "rya", "りゅ" to "ryu", "りょ" to "ryo",
+        "ぎゃ" to "gya", "ぎゅ" to "gyu", "ぎょ" to "gyo",
+        "じゃ" to "ja", "じゅ" to "ju", "じょ" to "jo",
+        "びゃ" to "bya", "びゅ" to "byu", "びょ" to "byo",
+        "ぴゃ" to "pya", "ぴゅ" to "pyu", "ぴょ" to "pyo",
+        "ふぁ" to "fa", "ふぃ" to "fi", "ふぇ" to "fe", "ふぉ" to "fo",
+        "うぃ" to "wi", "うぇ" to "we", "てぃ" to "ti", "でぃ" to "di",
+        "とぅ" to "tu", "どぅ" to "du", "ゔぁ" to "va", "ゔぃ" to "vi",
+        "ゔぇ" to "ve", "ゔぉ" to "vo", "しぇ" to "she", "ちぇ" to "che", "じぇ" to "je"
+    )
 
     private val KANA_MAP = mapOf(
         'あ' to "a", 'い' to "i", 'う' to "u", 'え' to "e", 'お' to "o",
@@ -295,13 +467,14 @@ object SimpMusicLyricsRepository {
         'な' to "na", 'に' to "ni", 'ぬ' to "nu", 'ね' to "ne", 'の' to "no",
         'は' to "ha", 'ひ' to "hi", 'ふ' to "fu", 'へ' to "he", 'ほ' to "ho",
         'ま' to "ma", 'み' to "mi", 'む' to "mu", 'め' to "me", 'も' to "mo",
-        'や' to "ya", 'ゆ' to "yu", 'よ' to "yo",
-        'ら' to "ra", 'り' to "ri", 'る' to "ru", 'れ' to "re", 'ろ' to "ro",
-        'わ' to "wa", 'を' to "wo", 'ん' to "n",
+        'や' to "ya", 'ゆ' to "yu", 'よ' to "yo", 'ら' to "ra", 'り' to "ri",
+        'る' to "ru", 'れ' to "re", 'ろ' to "ro", 'わ' to "wa", 'を' to "o", 'ん' to "n",
         'が' to "ga", 'ぎ' to "gi", 'ぐ' to "gu", 'げ' to "ge", 'ご' to "go",
         'ざ' to "za", 'じ' to "ji", 'ず' to "zu", 'ぜ' to "ze", 'ぞ' to "zo",
         'だ' to "da", 'ぢ' to "ji", 'づ' to "zu", 'で' to "de", 'ど' to "do",
         'ば' to "ba", 'び' to "bi", 'ぶ' to "bu", 'べ' to "be", 'ぼ' to "bo",
-        'ぱ' to "pa", 'ぴ' to "pi", 'ぷ' to "pu", 'ぺ' to "pe", 'ぽ' to "po"
+        'ぱ' to "pa", 'ぴ' to "pi", 'ぷ' to "pu", 'ぺ' to "pe", 'ぽ' to "po",
+        'ぁ' to "a", 'ぃ' to "i", 'ぅ' to "u", 'ぇ' to "e", 'ぉ' to "o",
+        'ゃ' to "ya", 'ゅ' to "yu", 'ょ' to "yo", 'ゔ' to "vu", 'ゕ' to "ka", 'ゖ' to "ke"
     )
 }

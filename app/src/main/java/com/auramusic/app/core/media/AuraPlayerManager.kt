@@ -143,6 +143,7 @@ object AuraPlayerManager {
     val playbackMode: StateFlow<PlaybackMode> = _playbackMode.asStateFlow()
 
     var onTrackFinishedCallback: ((AuraTrack) -> Unit)? = null
+    var onTrackSkippedCallback: ((AuraTrack) -> Unit)? = null
 
     fun initialize(context: Context) {
         if (exoPlayer != null) return
@@ -223,15 +224,11 @@ object AuraPlayerManager {
                         .setKey("video_$videoId")
                         .build()
                 } else {
-                    // Fallback to high quality audio stream if video resolution is unavailable
-                    val resolved = runBlocking(Dispatchers.IO) {
-                        SimpMusicExtractorEngine.resolveStream(videoId)
-                    }
-                    _streamSourceTier.value = if (resolved.bitrateKbps >= 140) "Ultra HD • ${resolved.bitrateKbps} KBPS" else "High Quality Audio"
-                    return@Factory dataSpec.buildUpon()
-                        .setUri(Uri.parse(resolved.streamUrl))
-                        .setKey(videoId)
-                        .build()
+                    throw PlaybackException(
+                        "Unable to resolve a video stream for $videoId",
+                        null,
+                        PlaybackException.ERROR_CODE_IO_UNSPECIFIED
+                    )
                 }
             }
             dataSpec
@@ -280,7 +277,7 @@ object AuraPlayerManager {
                     _currentTrack.value?.let { finished ->
                         onTrackFinishedCallback?.invoke(finished)
                     }
-                    skipToNext()
+                    skipToNext(recordSkip = false)
                 }
             }
 
@@ -298,6 +295,12 @@ object AuraPlayerManager {
 
             override fun onPlayerError(error: PlaybackException) {
                 Log.e(TAG, "ExoPlayer error: ${error.message}", error)
+                if (_isVideoMode.value) {
+                    _isVideoLoading.value = false
+                    Log.w(TAG, "Video playback failed; restoring the original audio track")
+                    switchToAudioMode()
+                    return
+                }
                 val failedVid = _currentTrack.value?.videoId ?: return
                 SimpMusicExtractorEngine.invalidateStream(failedVid)
                 // Automatic SimpMusic stream recovery
@@ -627,10 +630,22 @@ object AuraPlayerManager {
         _positionSec.value = seconds.coerceAtLeast(0f)
     }
 
-    fun skipToNext() {
+    fun skipToNext(recordSkip: Boolean = true) {
         val player = exoPlayer ?: return
+        if (recordSkip) _currentTrack.value?.let { track ->
+            val duration = track.durationSeconds.coerceAtLeast(1)
+            if (_positionSec.value < duration * 0.65f) onTrackSkippedCallback?.invoke(track)
+        }
         fadeJob?.cancel()
         player.volume = baseVolume
+        if (_isVideoMode.value) {
+            val list = _queue.value
+            val idx = list.indexOfFirst { it.videoId == _currentTrack.value?.videoId }
+            val nextVideo = list.getOrNull(idx + 1)
+                ?: list.firstOrNull().takeIf { list.isNotEmpty() && player.repeatMode == Player.REPEAT_MODE_ALL }
+            if (nextVideo != null) playStandaloneVideo(nextVideo, list)
+            return
+        }
         if (player.hasNextMediaItem()) {
             player.seekToNextMediaItem()
             player.play()
@@ -661,6 +676,10 @@ object AuraPlayerManager {
             val list = _queue.value
             val currentId = _currentTrack.value?.videoId
             val idx = list.indexOfFirst { it.videoId == currentId }
+            if (_isVideoMode.value) {
+                list.getOrNull(idx - 1)?.let { playStandaloneVideo(it, list) } ?: seekToSeconds(0f)
+                return
+            }
             if (idx > 0) {
                 playTrack(list[idx - 1], list, allowRadioQueue = _isShuffleEnabled.value)
             } else {
@@ -808,9 +827,10 @@ object AuraPlayerManager {
         }
         _isVideoMode.value = true
 
-        // Preserve Spotify high-res album cover & album metadata so UI remains visually pristine
+        // Keep the video's own thumbnail as the loading poster. Reusing the audio album cover here
+        // made an audio fallback look like a successfully loaded music video.
         val preservedTrack = videoTrack.copy(
-            artworkUrl = currentAudio?.highResArtworkUrl ?: videoTrack.artworkUrl,
+            artworkUrl = "https://i.ytimg.com/vi/${videoTrack.videoId}/hqdefault.jpg",
             album = currentAudio?.album ?: videoTrack.album
         )
         _currentTrack.value = preservedTrack
@@ -848,13 +868,63 @@ object AuraPlayerManager {
                     player.play()
                 }
             } else {
-                val mediaItem = buildMediaItem(preservedTrack)
-                player.setMediaItem(mediaItem, currentPos)
-                player.prepare()
-                if (wasPlaying) {
-                    player.play()
-                }
+                Log.w(TAG, "Could not resolve video ${videoTrack.videoId}; restoring audio playback")
+                switchToAudioMode()
             }
+        }
+    }
+
+    /** Starts a video discovered from the Home carousel as a video player session. */
+    fun playStandaloneVideo(videoTrack: AuraTrack, videoQueue: List<AuraTrack>) {
+        val previousTrack = _currentTrack.value
+        val previousQueue = _queue.value
+        val wasPlaying = exoPlayer?.isPlaying == true
+        exoPlayer?.pause()
+        originalAudioTrack = null
+        originalAudioQueue = null
+        originalAudioIndex = -1
+        originalQueue = videoQueue
+        _queue.value = videoQueue
+        _positionSec.value = 0f
+        _durationSec.value = videoTrack.durationSeconds.toFloat().coerceAtLeast(1f)
+        _isVideoMode.value = true
+        _currentTrack.value = videoTrack.copy(
+            artworkUrl = "https://i.ytimg.com/vi/${videoTrack.videoId}/hqdefault.jpg"
+        )
+
+        scope.launch {
+            _isVideoLoading.value = true
+            val resolved = withContext(Dispatchers.IO) {
+                SimpMusicExtractorEngine.resolveVideoStream(videoTrack.videoId)
+            }
+            _isVideoLoading.value = false
+
+            val player = exoPlayer ?: return@launch
+            if (resolved == null) {
+                Log.w(TAG, "Could not resolve Home music video ${videoTrack.videoId}")
+                _isVideoMode.value = false
+                _currentTrack.value = previousTrack
+                _queue.value = previousQueue
+                originalQueue = previousQueue
+                if (wasPlaying) exoPlayer?.play()
+                return@launch
+            }
+
+            _streamSourceTier.value = "Video HD • ${resolved.quality}"
+            val dataSourceFactory = cacheDataSourceFactory ?: DefaultDataSource.Factory(appContext!!)
+            val mediaSource = if (!resolved.audioUrl.isNullOrBlank()) {
+                val videoSource = ProgressiveMediaSource.Factory(dataSourceFactory)
+                    .createMediaSource(MediaItem.fromUri(Uri.parse(resolved.streamUrl)))
+                val audioSource = ProgressiveMediaSource.Factory(dataSourceFactory)
+                    .createMediaSource(MediaItem.fromUri(Uri.parse(resolved.audioUrl)))
+                MergingMediaSource(videoSource, audioSource)
+            } else {
+                ProgressiveMediaSource.Factory(dataSourceFactory)
+                    .createMediaSource(MediaItem.fromUri(Uri.parse(resolved.streamUrl)))
+            }
+            player.setMediaSource(mediaSource, 0L)
+            player.prepare()
+            player.play()
         }
     }
 
