@@ -71,6 +71,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -101,6 +102,9 @@ import coil.compose.AsyncImage
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.auramusic.app.core.media.AuraPlayerManager
 import com.auramusic.app.core.update.AuraUpdateManager
 import com.auramusic.app.domain.model.ArtistCarouselItem
@@ -133,6 +137,21 @@ fun AuraMainScreen(viewModel: AuraViewModel) {
     }.coerceIn(0f, 1f)
     val screenScope = rememberCoroutineScope()
     var openedPlaylistFromHome by remember { mutableStateOf(false) }
+    val lifecycleOwner = LocalLifecycleOwner.current
+
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                isPlayerCollapseTransition = false
+                isPlayerExpandTransition = false
+                screenScope.launch {
+                    collapseProgress.snapTo(if (isPlayerExpanded) 0f else 1f)
+                }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
     LaunchedEffect(isPlayerCollapseTransition) {
         if (isPlayerCollapseTransition) {
@@ -424,6 +443,7 @@ fun AuraMainScreen(viewModel: AuraViewModel) {
                     currentPlayingId = currentTrack?.videoId,
                     onClose = { viewModel.closeArtistDetail() },
                     onPlayTrack = { track, queue -> viewModel.playTrack(track, queue) },
+                    onPlayMusicVideo = { track, queue -> viewModel.playHomeMusicVideo(track, queue) },
                     onToggleFavorite = { viewModel.toggleFavorite(it) },
                     onOpenArtist = { artistName -> viewModel.openArtistByName(artistName) },
                     onOpenPlaylist = { item ->
@@ -495,8 +515,11 @@ fun AuraMainScreen(viewModel: AuraViewModel) {
             val activeTrack = currentTrack
             if (activeTrack != null && (!isPlayerExpanded || isPlayerCollapseTransition || isPlayerExpandTransition)) {
                 val currentQueue by AuraPlayerManager.queue.collectAsState()
-                val currentIndex = remember(currentQueue, activeTrack.videoId) {
-                    currentQueue.indexOfFirst { it.videoId == activeTrack.videoId }
+                val queueTrackId = if (isVideoMode && AuraPlayerManager.originalAudioTrack != null) {
+                    AuraPlayerManager.originalAudioTrack?.videoId
+                } else activeTrack.videoId
+                val currentIndex = remember(currentQueue, queueTrackId) {
+                    currentQueue.indexOfFirst { it.videoId == queueTrackId }
                 }
                 val previousTrack = remember(currentQueue, currentIndex) {
                     if (currentIndex > 0) currentQueue[currentIndex - 1] else null
@@ -866,6 +889,7 @@ private fun AuraMiniPlayer(
             .fillMaxWidth()
             .padding(horizontal = 20.dp)
             .clip(RoundedCornerShape(16.dp))
+            .clipToBounds()
             .clickable(onClick = onExpand)
             .onGloballyPositioned { onPlayerBoundsPositioned(it.boundsInRoot()) }
             .graphicsLayer {

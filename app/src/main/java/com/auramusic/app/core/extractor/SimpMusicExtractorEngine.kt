@@ -45,6 +45,7 @@ import org.schabi.newpipe.extractor.localization.Localization
 import org.schabi.newpipe.extractor.stream.StreamInfo as BraveStreamInfo
 import org.schabi.newpipe.extractor.stream.StreamInfoItem
 import java.io.IOException
+import kotlin.math.ln
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 
@@ -517,6 +518,49 @@ object SimpMusicExtractorEngine {
         return wanted.intersect(actual).size.toFloat() / wanted.size
     }
 
+    /** Reads YouTube's type from the possible watch-endpoint locations used by YTM search rows. */
+    private fun JSONObject.optMusicVideoType(): String? =
+        optJSONObject("watchEndpointMusicSupportedConfigs")
+            ?.optJSONObject("watchEndpointMusicConfig")
+            ?.optString("musicVideoType")
+            ?.takeIf { it.startsWith("MUSIC_VIDEO_TYPE_") }
+
+    private fun innerTubeMusicVideoType(item: JSONObject): String? {
+        val navigationType = item.optJSONObject("navigationEndpoint")
+            ?.optJSONObject("watchEndpoint")
+            ?.optMusicVideoType()
+        val overlayType = item.optJSONObject("overlay")
+            ?.optJSONObject("musicItemThumbnailOverlayRenderer")
+            ?.optJSONObject("content")
+            ?.optJSONObject("musicPlayButtonRenderer")
+            ?.optJSONObject("playNavigationEndpoint")
+            ?.optMusicVideoType()
+        val titleRunType = item.optJSONArray("flexColumns")
+            ?.optJSONObject(0)
+            ?.optJSONObject("musicResponsiveListItemFlexColumnRenderer")
+            ?.optJSONObject("text")
+            ?.optJSONArray("runs")
+            ?.optJSONObject(0)
+            ?.optJSONObject("navigationEndpoint")
+            ?.optJSONObject("watchEndpoint")
+            ?.optMusicVideoType()
+        return navigationType ?: overlayType ?: titleRunType
+    }
+
+    private fun isOfficialInnerTubeVideoType(type: String?): Boolean =
+        type.equals("MUSIC_VIDEO_TYPE_OMV", ignoreCase = true) ||
+            type.equals("MUSIC_VIDEO_TYPE_OFFICIAL_SOURCE_MUSIC", ignoreCase = true)
+
+    private fun hasOfficialVideoCue(title: String, artist: String): Boolean =
+        Regex("\\b(official|vevo)\\b").containsMatchIn(title) ||
+            Regex("\\b(mv|m/v)\\b").containsMatchIn(title) ||
+            Regex("\\bmusic\\s+video\\b").containsMatchIn(title) ||
+            Regex("\\b(vevo|official)\\b").containsMatchIn(artist)
+
+    private fun isTrustedVideoDistributor(artist: String): Boolean = Regex(
+        "\\b(netflix|vevo|sony music|universal music|warner records|republic records|atlantic records|hybe labels|smtown|jyp entertainment|yg entertainment|big hit music|bighit music|kq entertainment|starship entertainment)\\b"
+    ).containsMatchIn(artist)
+
     private fun isOfficialVideoMatch(
         candidate: AuraTrack,
         requestedTitle: String,
@@ -527,15 +571,10 @@ object SimpMusicExtractorEngine {
 
         val title = candidate.title.lowercase()
         val artist = candidate.artist.lowercase()
-        val hasOfficialCue =
-            Regex("\\b(official|vevo)\\b").containsMatchIn(title) ||
-                Regex("\\b(mv|vevo|official)\\b").containsMatchIn(artist) ||
-                Regex("\\bmv\\b").containsMatchIn(title)
-        if (!hasOfficialCue) return false
 
         val excludedTerms = listOf(
             "cover", "karaoke", "lyrics", "lyric video", "reaction", "instrumental", "audio", "live", "acoustic",
-            "tribute", "fan made", "slowed", "sped up", "nightcore", "audio only", " - topic"
+            "tribute", "fan made", "fanmade", "unofficial", "slowed", "sped up", "nightcore", "audio only", " - topic"
         )
         if (excludedTerms.any { title.contains(it) || artist.contains(it) }) return false
 
@@ -551,10 +590,36 @@ object SimpMusicExtractorEngine {
             .split(Regex("\\s+")).filter(String::isNotBlank).toSet()
         val foundArtistWords = normalizedVideoMatchText(candidate.artist)
             .split(Regex("\\s+")).filter(String::isNotBlank).toSet()
+        val foundTitleArtistWords = normalizedVideoMatchText(candidate.title)
+            .split(Regex("\\s+")).filter(String::isNotBlank).toSet()
         if (wantedArtistWords.isEmpty() || foundArtistWords.isEmpty()) return false
-        val artistMatch = wantedArtistWords.intersect(foundArtistWords).size.toFloat() / wantedArtistWords.size
-        return artistMatch >= 0.6f
+        val uploaderArtistMatch = wantedArtistWords.intersect(foundArtistWords).size.toFloat() / wantedArtistWords.size
+        val titleArtistMatch = wantedArtistWords.intersect(foundTitleArtistWords).size.toFloat() / wantedArtistWords.size
+        val hasVideoCue = hasOfficialVideoCue(title, artist)
+        val trustedDistributor = isTrustedVideoDistributor(artist)
+
+        // InnerTube's classification is useful evidence, but it is not enough by itself: unrelated
+        // uploads can be classified OMV, while licensed studio uploads can appear as UGC.
+        when (candidate.musicVideoType?.uppercase()) {
+            "MUSIC_VIDEO_TYPE_ATV" -> return false
+            "MUSIC_VIDEO_TYPE_UGC" -> return hasVideoCue && trustedDistributor &&
+                titleMatch >= 0.8f && titleArtistMatch >= 0.6f
+            "MUSIC_VIDEO_TYPE_OMV", "MUSIC_VIDEO_TYPE_OFFICIAL_SOURCE_MUSIC" ->
+                return titleMatch >= 0.8f &&
+                    (uploaderArtistMatch >= 0.6f || (trustedDistributor && titleArtistMatch >= 0.6f))
+        }
+
+        // Some search rows omit the type. In that case use explicit video wording and require
+        // either the artist as uploader or a recognized distributor with the artist in the title.
+        if (!hasVideoCue || titleMatch < 0.8f) return false
+        return uploaderArtistMatch >= 0.6f || (trustedDistributor && titleArtistMatch >= 0.6f)
     }
+
+    private fun officialVideoCandidateScore(candidate: AuraTrack, requestedTitle: String): Float =
+        (if (isOfficialInnerTubeVideoType(candidate.musicVideoType)) 10f else 0f) +
+            officialVideoMatchScore(candidate.title, requestedTitle) +
+            // Views only break close matches; they never turn a rejected result into an eligible one.
+            (candidate.viewCount?.takeIf { it > 0 }?.let { ln(it.toFloat() + 1f) / 100f } ?: 0f)
 
     suspend fun findOfficialMusicVideo(track: AuraTrack): AuraTrack? = withContext(Dispatchers.IO) {
         try {
@@ -564,7 +629,8 @@ object SimpMusicExtractorEngine {
             val isCurrentAlreadyMv = (lowerCurrentTitle.contains("official video") ||
                     lowerCurrentTitle.contains("music video") ||
                     lowerCurrentTitle.contains("official mv") ||
-                    lowerCurrentTitle.endsWith("mv")) &&
+                    lowerCurrentTitle.endsWith("mv") ||
+                    isOfficialInnerTubeVideoType(track.musicVideoType)) &&
                     !lowerCurrentArtist.contains("topic") &&
                     !lowerCurrentTitle.contains("audio") &&
                     !lowerCurrentTitle.contains("lyric")
@@ -587,20 +653,42 @@ object SimpMusicExtractorEngine {
 
             val titleForQuery = cleanTitle.ifBlank { track.title }
             val artistForQuery = cleanArtist.ifBlank { track.artist }
-            val query = "$titleForQuery $artistForQuery official music video".trim()
+            val fallbackQuery = "$titleForQuery $artistForQuery official music video".trim()
+            val queryVariants = listOf(
+                "$titleForQuery $artistForQuery",
+                "$artistForQuery $titleForQuery official music video",
+                "$titleForQuery $artistForQuery official music video"
+            ).map { it.trim() }.distinct()
 
-            // 1. Search YouTube Music with video filter
-            val results = searchYouTubeMusic(query, filter = "videos")
+            // Search InnerTube's video results with both natural and explicit queries. The YTM
+            // client often returns the official result for the natural query but ranks it lower
+            // when extra "official music video" terms are forced into the query.
+            val candidatesById = linkedMapOf<String, AuraTrack>()
+            queryVariants.map { searchQuery ->
+                async { searchYouTubeMusic(searchQuery, filter = "videos", prefetchTopResult = false) }
+            }.awaitAll().flatten().forEach { result ->
+                val existing = candidatesById[result.videoId]
+                if (existing == null) {
+                    candidatesById[result.videoId] = result
+                } else if ((existing.musicVideoType == null && result.musicVideoType != null) ||
+                    (existing.viewCount == null && result.viewCount != null)
+                ) {
+                    candidatesById[result.videoId] = existing.copy(
+                        musicVideoType = result.musicVideoType ?: existing.musicVideoType,
+                        viewCount = result.viewCount ?: existing.viewCount
+                    )
+                }
+            }
 
-            var candidate = results
+            var candidate = candidatesById.values
                 .filter { isOfficialVideoMatch(it, titleForQuery, artistForQuery, track.videoId) }
-                .maxByOrNull { officialVideoMatchScore(it.title, titleForQuery) }
+                .maxByOrNull { officialVideoCandidateScore(it, titleForQuery) }
 
             // 2. Direct YouTube fallback search via NewPipe extractor if YouTube Music didn't find an MV
             if (candidate == null) {
                 try {
                     initExtractors()
-                    val extractor = BraveServiceList.YouTube.getSearchExtractor(query)
+                    val extractor = BraveServiceList.YouTube.getSearchExtractor(fallbackQuery)
                     extractor.fetchPage()
                     val items = extractor.initialPage?.items ?: emptyList()
                     val ytItem = items.filterIsInstance<StreamInfoItem>().firstOrNull { item ->
@@ -675,7 +763,11 @@ object SimpMusicExtractorEngine {
      * Direct YouTube Music WEB_REMIX search (`https://music.youtube.com/youtubei/v1/search`)
      * with NewPipeExtractor fallback.
      */
-    suspend fun searchYouTubeMusic(query: String, filter: String = "songs"): List<AuraTrack> =
+    suspend fun searchYouTubeMusic(
+        query: String,
+        filter: String = "songs",
+        prefetchTopResult: Boolean = true
+    ): List<AuraTrack> =
         withContext(Dispatchers.IO) {
             if (query.isBlank()) return@withContext emptyList()
             val normFilter = filter.lowercase().trim()
@@ -756,7 +848,7 @@ object SimpMusicExtractorEngine {
 
                 if (tracks.isNotEmpty()) {
                     // Proactively pre-warm the top search result for instant 0ms playback when tapped!
-                    prefetchStream(tracks.first().videoId)
+                    if (prefetchTopResult) prefetchStream(tracks.first().videoId)
                     return@withContext tracks.distinctBy { it.videoId }
                 }
             } catch (e: Exception) {
@@ -785,7 +877,7 @@ object SimpMusicExtractorEngine {
                             ?: "https://img.youtube.com/vi/$vidId/hqdefault.jpg"
                     )
                 }
-                results.firstOrNull()?.let { prefetchStream(it.videoId) }
+                if (prefetchTopResult) results.firstOrNull()?.let { prefetchStream(it.videoId) }
                 results.distinctBy { it.videoId }
             } catch (e: Exception) {
                 Log.e(TAG, "Search failed: ${e.message}")
@@ -2382,6 +2474,22 @@ object SimpMusicExtractorEngine {
         )
     }
 
+    private fun parseCompactViewCount(metadata: List<String>): Long? {
+        val viewPattern = Regex("([\\d,.]+)\\s*([KMB])?\\s*(?:views|plays)", RegexOption.IGNORE_CASE)
+        for (entry in metadata) {
+            val match = viewPattern.find(entry) ?: continue
+            val amount = match.groupValues[1].replace(",", "").toDoubleOrNull() ?: continue
+            val multiplier = when (match.groupValues[2].uppercase()) {
+                "K" -> 1_000.0
+                "M" -> 1_000_000.0
+                "B" -> 1_000_000_000.0
+                else -> 1.0
+            }
+            return (amount * multiplier).toLong().coerceAtLeast(0L)
+        }
+        return null
+    }
+
     private fun parseYtmSearchTracks(root: JSONObject, out: MutableList<AuraTrack>) {
         val tabs = root.optJSONObject("contents")
             ?.optJSONObject("tabbedSearchResultsRenderer")
@@ -2441,6 +2549,7 @@ object SimpMusicExtractorEngine {
                     var artist = "YouTube Artist"
                     var album = "YouTube Music"
                     var durationSec = 210
+                    var viewCount: Long? = null
 
                     if (subtitleRuns != null) {
                         val texts = mutableListOf<String>()
@@ -2457,6 +2566,7 @@ object SimpMusicExtractorEngine {
                                 texts[0]
                             }
                         }
+                        viewCount = parseCompactViewCount(texts)
                         texts.firstOrNull { it.matches(Regex("^\\d+:\\d{2}(:\\d{2})?$")) }?.let {
                             durationSec = parseDurationText(it)
                         }
@@ -2488,7 +2598,9 @@ object SimpMusicExtractorEngine {
                             artist = artist.replace(" - Topic", "").trim(),
                             album = album,
                             durationSeconds = durationSec,
-                            artworkUrl = rawThumb
+                            artworkUrl = rawThumb,
+                            musicVideoType = innerTubeMusicVideoType(item),
+                            viewCount = viewCount
                         )
                     )
                 }

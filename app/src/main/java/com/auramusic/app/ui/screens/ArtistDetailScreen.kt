@@ -86,6 +86,7 @@ fun ArtistDetailScreen(
     currentPlayingId: String?,
     onClose: () -> Unit,
     onPlayTrack: (AuraTrack, List<AuraTrack>) -> Unit,
+    onPlayMusicVideo: (AuraTrack, List<AuraTrack>) -> Unit = onPlayTrack,
     onToggleFavorite: (AuraTrack) -> Unit,
     onOpenArtist: (String) -> Unit = {},
     onOpenPlaylist: (ArtistCarouselItem) -> Unit = {}
@@ -283,6 +284,19 @@ fun ArtistDetailScreen(
                             carousel.title.contains("similar", ignoreCase = true)
                     val isVideos = carousel.title.contains("video", ignoreCase = true) ||
                             carousel.title.contains("live performance", ignoreCase = true)
+                    val carouselVideoTracks = if (isVideos) carousel.items.mapNotNull { item ->
+                        val videoId = item.videoId.ifBlank { item.id }
+                        videoId.takeIf { it.isNotBlank() }?.let {
+                            AuraTrack(
+                                id = "yt_$it",
+                                videoId = it,
+                                title = item.title,
+                                artist = artistDetail.name,
+                                album = carousel.title,
+                                artworkUrl = item.artworkUrl
+                            )
+                        }
+                    } else emptyList()
 
                     Spacer(modifier = Modifier.height(20.dp))
                     Column(modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp)) {
@@ -368,18 +382,9 @@ fun ArtistDetailScreen(
                                                 .width(192.dp)
                                                 .clip(RoundedCornerShape(12.dp))
                                                 .clickable {
-                                                    val vidId = item.videoId.ifBlank { item.id }
-                                                    if (vidId.isNotBlank()) {
-                                                        val videoTrack = AuraTrack(
-                                                            id = "yt_$vidId",
-                                                            videoId = vidId,
-                                                            title = item.title,
-                                                            artist = artistDetail.name,
-                                                            album = carousel.title,
-                                                            artworkUrl = item.artworkUrl
-                                                        )
-                                                        onPlayTrack(videoTrack, listOf(videoTrack))
-                                                    }
+                                                    carouselVideoTracks.firstOrNull { track ->
+                                                        track.videoId == item.videoId.ifBlank { item.id }
+                                                    }?.let { onPlayMusicVideo(it, carouselVideoTracks) }
                                                 }
                                         ) {
                                             Box(

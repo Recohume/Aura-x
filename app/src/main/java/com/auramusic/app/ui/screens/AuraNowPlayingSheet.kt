@@ -1009,15 +1009,24 @@ fun AuraVideoPlayerSurface(
     onSwitchToAudio: () -> Unit
 ) {
     Box(
-        modifier = modifier.background(Color.Black),
+        modifier = modifier
+            .background(Color.Black)
+            .clipToBounds(),
         contentAlignment = Alignment.Center
     ) {
-        // High quality poster artwork underneath video view to eliminate cold black screens
+        // A soft, dimmed poster fills any space left by the video's native aspect ratio.
         AsyncImage(
             model = track.highResArtworkUrl.ifBlank { "https://i.ytimg.com/vi/${track.videoId}/hqdefault.jpg" },
             contentDescription = track.title,
             contentScale = ContentScale.Crop,
-            modifier = Modifier.fillMaxSize()
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer {
+                    scaleX = 1.18f
+                    scaleY = 1.18f
+                    alpha = 0.62f
+                }
+                .blur(28.dp)
         )
 
         AndroidView(
@@ -1040,7 +1049,13 @@ fun AuraVideoPlayerSurface(
                     view.player = com.auramusic.app.core.media.AuraPlayerManager.exoPlayer
                 }
             },
-            modifier = Modifier.fillMaxSize()
+            modifier = Modifier.fillMaxSize(),
+            onRelease = { view ->
+                // PlayerView uses a separate video surface by default. Explicitly detach it
+                // when the full player leaves composition so it cannot cover or intercept
+                // the mini-player after a video is collapsed.
+                view.player = null
+            }
         )
 
         // Loading indicator overlay while resolving video stream

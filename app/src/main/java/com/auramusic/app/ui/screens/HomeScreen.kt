@@ -6,6 +6,7 @@ import com.auramusic.app.core.media.AuraPlayerManager
 import com.auramusic.app.ui.components.AuraAddToPlaylistModal
 import com.auramusic.app.ui.components.AuraCreatePlaylistModal
 import com.auramusic.app.ui.components.AuraTrackOptionsModal
+import com.auramusic.app.ui.components.auraShimmer
 
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -57,13 +58,16 @@ import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -111,6 +115,7 @@ import com.auramusic.app.ui.theme.TextSecondary
 import java.util.Calendar
 
 @Composable
+@OptIn(ExperimentalMaterial3Api::class)
 fun HomeScreen(
     chartSections: List<YtmChartSection>,
     moodCategories: List<MoodCategory>,
@@ -153,6 +158,10 @@ fun HomeScreen(
     var selectedTrackForOptions by remember { mutableStateOf<AuraTrack?>(null) }
     var trackForAddToPlaylist by remember { mutableStateOf<AuraTrack?>(null) }
     var showCreatePlaylistModal by remember { mutableStateOf(false) }
+    var isPullRefreshing by remember { mutableStateOf(false) }
+    LaunchedEffect(isLoading) {
+        if (!isLoading) isPullRefreshing = false
+    }
 
     val liveTopTracks = chartSections.firstOrNull()?.tracks?.ifEmpty { SimpMusicExtractorEngine.DEFAULT_SEED_TRACKS }
         ?: SimpMusicExtractorEngine.DEFAULT_SEED_TRACKS
@@ -194,12 +203,20 @@ fun HomeScreen(
         label = "dotAlpha"
     )
 
-    LazyColumn(
+    PullToRefreshBox(
+        isRefreshing = isPullRefreshing,
+        onRefresh = {
+            isPullRefreshing = true
+            onRefresh()
+        },
         modifier = Modifier
             .fillMaxSize()
-            .background(SpotifyPitchBlack),
-        contentPadding = PaddingValues(bottom = 140.dp)
+            .background(SpotifyPitchBlack)
     ) {
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(bottom = 140.dp)
+        ) {
         item {
             Column {
                 Spacer(modifier = Modifier.height(18.dp))
@@ -266,15 +283,8 @@ fun HomeScreen(
                     }
                     Spacer(modifier = Modifier.height(12.dp))
                     if (quickPickTracks.isEmpty()) {
-                        Box(
-                            modifier = Modifier.fillMaxWidth().height(68.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            CircularProgressIndicator(
-                                color = AuraNeonLime,
-                                strokeWidth = 2.dp,
-                                modifier = Modifier.size(22.dp)
-                            )
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            repeat(4) { com.auramusic.app.ui.components.TrackItemSkeleton() }
                         }
                     } else BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
                         val pageWidth = (maxWidth - 56.dp).coerceAtLeast(280.dp)
@@ -382,17 +392,22 @@ fun HomeScreen(
                     }
                     Spacer(modifier = Modifier.height(14.dp))
                     if (musicVideos.isEmpty()) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(190.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            CircularProgressIndicator(
-                                color = AuraNeonLime,
-                                strokeWidth = 2.dp,
-                                modifier = Modifier.size(22.dp)
-                            )
+                        BoxWithConstraints(Modifier.fillMaxWidth()) {
+                            val cardWidth = (maxWidth - 56.dp).coerceAtLeast(280.dp)
+                            LazyRow(
+                                contentPadding = PaddingValues(horizontal = 20.dp),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                items(2) {
+                                    Box(
+                                        Modifier
+                                            .width(cardWidth)
+                                            .aspectRatio(16f / 9f)
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .auraShimmer()
+                                    )
+                                }
+                            }
                         }
                     } else {
                         BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
@@ -478,7 +493,7 @@ fun HomeScreen(
         }
 
         // 3. Top Artists Carousel (Live YouTube Music Charts FEmusic_charts)
-        if (visibleTopArtists.isNotEmpty() || (activeCategory == "All" && isLoading)) {
+        if (visibleTopArtists.isNotEmpty() || (activeCategory == "All" && isLoading) || (activeCategory != "All" && isCategoryLoading)) {
             item {
                 Column(modifier = Modifier.fillMaxWidth().padding(bottom = 22.dp)) {
                     Row(
@@ -497,7 +512,7 @@ fun HomeScreen(
                         )
                     }
                     Spacer(modifier = Modifier.height(14.dp))
-                    if (visibleTopArtists.isEmpty() && isLoading) {
+                    if (visibleTopArtists.isEmpty() && (isLoading || isCategoryLoading)) {
                         com.auramusic.app.ui.components.ArtistCarouselSkeleton()
                     } else {
                         LazyRow(
@@ -716,7 +731,7 @@ fun HomeScreen(
         }
 
         // 4c. Your Playlists Carousel (User & Imported Spotify Playlists)
-        if (visibleUserPlaylists.isNotEmpty()) {
+        if (visibleUserPlaylists.isNotEmpty() || (activeCategory != "All" && isCategoryLoading)) {
             item {
                 Column(modifier = Modifier.fillMaxWidth().padding(bottom = 22.dp)) {
                     Text(
@@ -728,7 +743,9 @@ fun HomeScreen(
                         modifier = Modifier.padding(horizontal = 20.dp)
                     )
                     Spacer(modifier = Modifier.height(12.dp))
-                    if (visibleUserPlaylists.size >= 4) {
+                    if (visibleUserPlaylists.isEmpty() && isCategoryLoading) {
+                        com.auramusic.app.ui.components.PlaylistCarouselSkeleton()
+                    } else if (visibleUserPlaylists.size >= 4) {
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -822,20 +839,34 @@ fun HomeScreen(
             }
         }
 
-        if (albumRecommendations.isNotEmpty()) {
+        if (albumRecommendations.isNotEmpty() || (activeCategory != "All" && isCategoryLoading)) {
             item {
-                HomeRecommendationShelf(
-                    title = if (activeCategory == "All") "Albums for you" else "$activeCategory albums",
-                    tracks = albumRecommendations,
-                    currentPlayingId = currentPlayingId,
-                    isPlaying = isPlaying,
-                    onPlayTrack = onPlayTrack,
-                    titleForTrack = { track ->
-                        track.album.takeIf { it.isNotBlank() && !it.equals("YouTube Music", true) }
-                            ?: track.title
-                    },
-                    keyPrefix = "album_pick"
-                )
+                if (albumRecommendations.isEmpty() && isCategoryLoading) {
+                    Column(Modifier.fillMaxWidth().padding(bottom = 22.dp)) {
+                        Text(
+                            text = "$activeCategory albums",
+                            color = Color.White,
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 21.sp,
+                            modifier = Modifier.padding(horizontal = 20.dp)
+                        )
+                        Spacer(Modifier.height(14.dp))
+                        com.auramusic.app.ui.components.AlbumCarouselSkeleton()
+                    }
+                } else {
+                    HomeRecommendationShelf(
+                        title = if (activeCategory == "All") "Albums for you" else "$activeCategory albums",
+                        tracks = albumRecommendations,
+                        currentPlayingId = currentPlayingId,
+                        isPlaying = isPlaying,
+                        onPlayTrack = onPlayTrack,
+                        titleForTrack = { track ->
+                            track.album.takeIf { it.isNotBlank() && !it.equals("YouTube Music", true) }
+                                ?: track.title
+                        },
+                        keyPrefix = "album_pick"
+                    )
+                }
             }
         }
 
@@ -855,20 +886,13 @@ fun HomeScreen(
                     color = Color.White,
                     fontSize = 19.sp
                 )
-                if (isCategoryLoading) {
-                    CircularProgressIndicator(
-                        color = AuraNeonLime,
-                        strokeWidth = 2.dp,
-                        modifier = Modifier.size(16.dp)
-                    )
-                }
             }
             Spacer(modifier = Modifier.height(10.dp))
         }
 
         // 6. Tracklist Items with Badges (LYRICS / E) - Paginated to avoid rate limits
         if ((isLoading || isCategoryLoading) && displayedTracks.isEmpty()) {
-            items(6) {
+            items(if (isCategoryLoading) 8 else 6) {
                 com.auramusic.app.ui.components.TrackItemSkeleton()
             }
         } else {
@@ -935,6 +959,7 @@ fun HomeScreen(
                     }
                 }
             }
+        }
         }
     }
 

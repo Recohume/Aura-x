@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -359,7 +360,12 @@ fun PlaylistDetailsScreen(
             }
 
             // Song list items
-            items(playlist.tracks, key = { it.videoId }) { track ->
+            // Imported playlists may intentionally contain the same song more than once.
+            // Include the occurrence index so repeated video IDs never collide in LazyColumn.
+            itemsIndexed(
+                items = playlist.tracks,
+                key = { index, track -> "playlist_track_${index}_${track.videoId.ifBlank { track.id }}" }
+            ) { _, track ->
                 SpotifyTrackRowItem(
                     track = track,
                     isCurrent = currentPlayingId == track.videoId,

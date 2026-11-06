@@ -144,6 +144,7 @@ object AuraPlayerManager {
 
     var onTrackFinishedCallback: ((AuraTrack) -> Unit)? = null
     var onTrackSkippedCallback: ((AuraTrack) -> Unit)? = null
+    var onVideoUnavailableCallback: ((AuraTrack) -> Unit)? = null
 
     fun initialize(context: Context) {
         if (exoPlayer != null) return
@@ -298,6 +299,7 @@ object AuraPlayerManager {
                 if (_isVideoMode.value) {
                     _isVideoLoading.value = false
                     Log.w(TAG, "Video playback failed; restoring the original audio track")
+                    (originalAudioTrack ?: _currentTrack.value)?.let { onVideoUnavailableCallback?.invoke(it) }
                     switchToAudioMode()
                     return
                 }
@@ -639,11 +641,15 @@ object AuraPlayerManager {
         fadeJob?.cancel()
         player.volume = baseVolume
         if (_isVideoMode.value) {
-            val list = _queue.value
-            val idx = list.indexOfFirst { it.videoId == _currentTrack.value?.videoId }
-            val nextVideo = list.getOrNull(idx + 1)
-                ?: list.firstOrNull().takeIf { list.isNotEmpty() && player.repeatMode == Player.REPEAT_MODE_ALL }
-            if (nextVideo != null) playStandaloneVideo(nextVideo, list)
+            if (originalAudioTrack != null) {
+                advanceSongVideoQueue()
+            } else {
+                val list = _queue.value
+                val idx = list.indexOfFirst { it.videoId == _currentTrack.value?.videoId }
+                val nextVideo = list.getOrNull(idx + 1)
+                    ?: list.firstOrNull().takeIf { list.isNotEmpty() && player.repeatMode == Player.REPEAT_MODE_ALL }
+                if (nextVideo != null) playStandaloneVideo(nextVideo, list)
+            }
             return
         }
         if (player.hasNextMediaItem()) {
@@ -669,7 +675,33 @@ object AuraPlayerManager {
             seekToSeconds(0f)
             return
         }
-        if (player.hasPreviousMediaItem()) {
+        if (_isVideoMode.value && originalAudioTrack != null) {
+            val list = originalAudioQueue ?: _queue.value
+            val index = list.indexOfFirst { it.videoId == originalAudioTrack?.videoId }
+            val previousAudio = list.getOrNull(index - 1) ?: run {
+                seekToSeconds(0f)
+                return
+            }
+            scope.launch {
+                _isVideoLoading.value = true
+                val video = withContext(Dispatchers.IO) {
+                    SimpMusicExtractorEngine.findOfficialMusicVideo(previousAudio)
+                }
+                _isVideoLoading.value = false
+                if (video != null) {
+                    originalAudioTrack = previousAudio
+                    originalAudioIndex = list.indexOfFirst { it.videoId == previousAudio.videoId }
+                    playVideoForTrack(video, previousAudio)
+                } else {
+                    onVideoUnavailableCallback?.invoke(previousAudio)
+                    originalAudioTrack = null
+                    originalAudioQueue = null
+                    originalAudioIndex = -1
+                    _isVideoMode.value = false
+                    playTrack(previousAudio, list, allowRadioQueue = false)
+                }
+            }
+        } else if (player.hasPreviousMediaItem()) {
             player.seekToPreviousMediaItem()
             player.play()
         } else {
@@ -818,14 +850,21 @@ object AuraPlayerManager {
      * Seamlessly launches official music video playback while preserving the original
      * Spotify song artwork, metadata, and playlist queue.
      */
-    fun playVideoForTrack(videoTrack: AuraTrack, fromAudioTrack: AuraTrack? = null) {
+    fun playVideoForTrack(
+        videoTrack: AuraTrack,
+        fromAudioTrack: AuraTrack? = null,
+        startPlayback: Boolean = false
+    ) {
         val currentAudio = fromAudioTrack ?: currentTrack.value
+        val player = exoPlayer
         if (currentAudio != null && originalAudioTrack == null) {
             originalAudioTrack = currentAudio
             originalAudioQueue = _queue.value
-            originalAudioIndex = exoPlayer?.currentMediaItemIndex ?: -1
+            originalAudioIndex = _queue.value.indexOfFirst { it.videoId == currentAudio.videoId }
         }
         _isVideoMode.value = true
+        val wasPlaying = player?.isPlaying == true || startPlayback
+        player?.pause()
 
         // Keep the video's own thumbnail as the loading poster. Reusing the audio album cover here
         // made an audio fallback look like a successfully loaded music video.
@@ -843,9 +882,6 @@ object AuraPlayerManager {
             _isVideoLoading.value = false
 
             val player = exoPlayer ?: return@launch
-            val currentPos = player.currentPosition
-            val wasPlaying = player.isPlaying
-
             if (resolved != null) {
                 _streamSourceTier.value = "Video HD • ${resolved.quality}"
                 val cFactory = cacheDataSourceFactory ?: DefaultDataSource.Factory(appContext!!)
@@ -862,7 +898,7 @@ object AuraPlayerManager {
                         .createMediaSource(MediaItem.fromUri(Uri.parse(resolved.streamUrl)))
                 }
 
-                player.setMediaSource(mediaSource, currentPos)
+                player.setMediaSource(mediaSource, 0L)
                 player.prepare()
                 if (wasPlaying) {
                     player.play()
@@ -870,6 +906,39 @@ object AuraPlayerManager {
             } else {
                 Log.w(TAG, "Could not resolve video ${videoTrack.videoId}; restoring audio playback")
                 switchToAudioMode()
+                if (wasPlaying) exoPlayer?.play()
+                currentAudio?.let { onVideoUnavailableCallback?.invoke(it) }
+            }
+        }
+    }
+
+    private fun advanceSongVideoQueue() {
+        val list = originalAudioQueue ?: _queue.value
+        val currentAudio = originalAudioTrack ?: return
+        val currentIndex = list.indexOfFirst { it.videoId == currentAudio.videoId }
+        val nextAudio = list.getOrNull(currentIndex + 1)
+            ?: list.firstOrNull().takeIf { list.isNotEmpty() && exoPlayer?.repeatMode == Player.REPEAT_MODE_ALL }
+            ?: return
+        scope.launch {
+            _isVideoLoading.value = true
+            val officialVideo = withContext(Dispatchers.IO) {
+                SimpMusicExtractorEngine.findOfficialMusicVideo(nextAudio)
+            }
+            _isVideoLoading.value = false
+            if (officialVideo != null) {
+                originalAudioTrack = nextAudio
+                originalAudioQueue = list
+                originalAudioIndex = list.indexOfFirst { it.videoId == nextAudio.videoId }
+                _queue.value = list
+                playVideoForTrack(officialVideo, nextAudio, startPlayback = true)
+            } else {
+                Log.i(TAG, "No official video found for '${nextAudio.title}', continuing with audio")
+                onVideoUnavailableCallback?.invoke(nextAudio)
+                originalAudioTrack = null
+                originalAudioQueue = null
+                originalAudioIndex = -1
+                _isVideoMode.value = false
+                playTrack(nextAudio, list, allowRadioQueue = false)
             }
         }
     }
@@ -975,7 +1044,18 @@ object AuraPlayerManager {
             switchToAudioMode()
         } else {
             val cur = currentTrack.value ?: return
-            playVideoForTrack(cur)
+            scope.launch {
+                _isVideoLoading.value = true
+                val video = withContext(Dispatchers.IO) {
+                    SimpMusicExtractorEngine.findOfficialMusicVideo(cur)
+                }
+                _isVideoLoading.value = false
+                if (video != null) playVideoForTrack(video, cur)
+                else {
+                    _isVideoMode.value = false
+                    onVideoUnavailableCallback?.invoke(cur)
+                }
+            }
         }
     }
 

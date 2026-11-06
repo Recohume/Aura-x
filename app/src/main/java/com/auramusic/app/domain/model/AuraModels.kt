@@ -38,7 +38,11 @@ data class AuraTrack(
     val isDownloaded: Boolean = false,
     val localFilePath: String? = null,
     val isExplicit: Boolean = false,
-    val hasLyricsBadge: Boolean = true
+    val hasLyricsBadge: Boolean = true,
+    /** YouTube InnerTube's MUSIC_VIDEO_TYPE_* value when the response provides it. */
+    val musicVideoType: String? = null,
+    /** Approximate count from the InnerTube search subtitle, when available. */
+    val viewCount: Long? = null
 ) {
     val highResArtworkUrl: String
         get() = toHighResArtwork(artworkUrl, videoId)

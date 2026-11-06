@@ -889,6 +889,7 @@ private fun DedicatedSearchingView(
                             track = track,
                             isFavorite = isFav,
                             onClick = { onPlayTrack(track, recentlyPlayed) },
+                            onOptionsClick = { onOptionsClick(track) },
                             onToggleFavorite = { onToggleFavorite(track) },
                             onRemove = { onRemoveRecentlyPlayed(track) }
                         )
@@ -1032,18 +1033,20 @@ private fun DedicatedSearchingView(
  * Tile for Recent Played Songs on the Dedicated Search Screen:
  * Cover image, Title, Artist, and on the right side: Heart icon and 'X' remove icon.
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun RecentPlayedTrackRow(
     track: AuraTrack,
     isFavorite: Boolean,
     onClick: () -> Unit,
+    onOptionsClick: () -> Unit,
     onToggleFavorite: () -> Unit,
     onRemove: () -> Unit
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .combinedClickable(onClick = onClick, onLongClick = onOptionsClick)
             .padding(horizontal = 20.dp, vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -1059,9 +1062,7 @@ private fun RecentPlayedTrackRow(
         Spacer(modifier = Modifier.width(14.dp))
 
         Column(
-            modifier = Modifier
-                .weight(1f)
-                .clickable(onClick = onClick)
+            modifier = Modifier.weight(1f)
         ) {
             Text(
                 text = track.title,
@@ -1348,9 +1349,7 @@ private fun SearchResultSongTile(
         Spacer(modifier = Modifier.width(14.dp))
 
         Column(
-            modifier = Modifier
-                .weight(1f)
-                .clickable(onClick = onClick)
+            modifier = Modifier.weight(1f)
         ) {
             Text(
                 text = track.title,

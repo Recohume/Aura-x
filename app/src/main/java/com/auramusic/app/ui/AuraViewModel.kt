@@ -234,6 +234,13 @@ class AuraViewModel(application: Application) : AndroidViewModel(application) {
             storage.recordRecommendationSignal(skippedTrack, "skip")
             applyLocalRecommendations()
         }
+        AuraPlayerManager.onVideoUnavailableCallback = { track ->
+            Toast.makeText(
+                getApplication(),
+                "No music video found for ${track.title}; continuing with audio",
+                Toast.LENGTH_SHORT
+            ).show()
+        }
 
         // Observe current track changes to fetch Palette, SimpMusic RichSync Lyrics, SponsorBlock, and RYD in parallel
         viewModelScope.launch {
