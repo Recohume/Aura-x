@@ -170,6 +170,7 @@ class AuraStorageRepository(context: Context) {
 
     fun loadNowPlayingStyle(): NowPlayingStyle {
         val name = prefs.getString("now_playing_style", NowPlayingStyle.SPOTIFY.name)
+        if (name == "APPLE_MUSIC") return NowPlayingStyle.LIQUID_GLASS
         return NowPlayingStyle.entries.firstOrNull { it.name == name } ?: NowPlayingStyle.SPOTIFY
     }
 
@@ -226,12 +227,21 @@ class AuraStorageRepository(context: Context) {
 
     fun recordTrackPlay(track: AuraTrack): ListeningStats {
         recordRecentlyPlayed(track)
-        val totalMin = prefs.getInt("stats_total_min", 48) + (track.durationSeconds / 60).coerceAtLeast(3)
-        val totalPlays = prefs.getInt("stats_tracks_played", 14) + 1
+        val totalMin = prefs.getInt("stats_total_min", 0) + (track.durationSeconds / 60).coerceAtLeast(3)
+        val totalPlays = prefs.getInt("stats_tracks_played", 0) + 1
         prefs.edit()
             .putInt("stats_total_min", totalMin)
             .putInt("stats_tracks_played", totalPlays)
             .apply()
+
+        if (track.videoId.isNotBlank()) {
+            val playedTracks = JSONObject(prefs.getString("stats_track_plays", "{}") ?: "{}")
+            val row = playedTracks.optJSONObject(track.videoId) ?: JSONObject()
+            row.put("count", row.optInt("count", 0) + 1)
+            row.put("track", serializeTrackArray(listOf(track)).optJSONObject(0))
+            playedTracks.put(track.videoId, row)
+            prefs.edit().putString("stats_track_plays", playedTracks.toString()).apply()
+        }
 
         val artistsJson = JSONObject(prefs.getString("stats_artists", "{}") ?: "{}")
         val cleanArtist = track.artist.split(",", "ft.").firstOrNull()?.trim() ?: track.artist
@@ -246,8 +256,8 @@ class AuraStorageRepository(context: Context) {
     }
 
     fun loadListeningStats(): ListeningStats {
-        val totalMin = prefs.getInt("stats_total_min", 48)
-        val totalPlays = prefs.getInt("stats_tracks_played", 14)
+        val totalMin = prefs.getInt("stats_total_min", 0)
+        val totalPlays = prefs.getInt("stats_tracks_played", 0)
 
         val artistsJson = JSONObject(prefs.getString("stats_artists", "{}") ?: "{}")
         val topArtists = artistsJson.keys().asSequence()
@@ -255,9 +265,6 @@ class AuraStorageRepository(context: Context) {
             .sortedByDescending { it.second }
             .take(5)
             .toList()
-            .ifEmpty {
-                listOf("The Weeknd" to 8, "SZA" to 4, "Daft Punk" to 3)
-            }
 
         val genresJson = JSONObject(prefs.getString("stats_genres", "{}") ?: "{}")
         val topGenres = genresJson.keys().asSequence()
@@ -265,15 +272,26 @@ class AuraStorageRepository(context: Context) {
             .sortedByDescending { it.second }
             .take(4)
             .toList()
-            .ifEmpty {
-                listOf("Synthwave / Pop" to 7, "R&B" to 5, "Electronic" to 3)
-            }
+
+        val topTracks = runCatching {
+            val playedTracks = JSONObject(prefs.getString("stats_track_plays", "{}") ?: "{}")
+            playedTracks.keys().asSequence().mapNotNull { videoId ->
+                val row = playedTracks.optJSONObject(videoId) ?: return@mapNotNull null
+                val count = row.optInt("count", 0)
+                if (count <= 0) return@mapNotNull null
+                val trackJson = row.optJSONObject("track") ?: return@mapNotNull null
+                val track = parseTrackArray(JSONArray().put(trackJson).toString()).firstOrNull()
+                    ?: return@mapNotNull null
+                track to count
+            }.sortedByDescending { it.second }.take(3).toList()
+        }.getOrDefault(emptyList())
 
         return ListeningStats(
             totalMinutes = totalMin,
             tracksPlayed = totalPlays,
             topArtists = topArtists,
             topGenres = topGenres,
+            topTracks = topTracks,
             peakHourLabel = "10:00 PM – 1:00 AM"
         )
     }
@@ -324,5 +342,64 @@ class AuraStorageRepository(context: Context) {
         } catch (e: Exception) {
             emptyList()
         }
+    }
+
+    // --- SimpMusic Settings & Fidelity Persistence ---
+    fun loadAudioQuality(): String = prefs.getString("setting_audio_quality", "Auto") ?: "Auto"
+    fun saveAudioQuality(quality: String) {
+        prefs.edit().putString("setting_audio_quality", quality).apply()
+    }
+
+    fun loadVideoQuality(): String = prefs.getString("setting_video_quality", "Auto (1080p)") ?: "Auto (1080p)"
+    fun saveVideoQuality(quality: String) {
+        prefs.edit().putString("setting_video_quality", quality).apply()
+    }
+
+    fun loadRomanizationLanguages(): Set<String> {
+        val raw = prefs.getString("setting_romanization_languages", null)
+        return raw?.split(",")?.map { it.trim() }?.filter { it.isNotBlank() }?.toSet()
+            ?: setOf("Japanese", "Korean", "Chinese")
+    }
+    fun saveRomanizationLanguages(languages: Set<String>) {
+        prefs.edit().putString("setting_romanization_languages", languages.joinToString(",")).apply()
+    }
+
+    fun loadNormalizeVolume(): Boolean = prefs.getBoolean("setting_normalize_volume", true)
+    fun saveNormalizeVolume(enabled: Boolean) {
+        prefs.edit().putBoolean("setting_normalize_volume", enabled).apply()
+    }
+
+    fun loadSkipSilence(): Boolean = prefs.getBoolean("setting_skip_silence", false)
+    fun saveSkipSilence(enabled: Boolean) {
+        prefs.edit().putBoolean("setting_skip_silence", enabled).apply()
+    }
+
+    fun loadCrossfadeDuration(): Int = prefs.getInt("setting_crossfade_sec", 0)
+    fun saveCrossfadeDuration(sec: Int) {
+        prefs.edit().putInt("setting_crossfade_sec", sec).apply()
+    }
+
+    fun loadMaxCacheSize(): Int = prefs.getInt("setting_max_cache_mb", 1024)
+    fun saveMaxCacheSize(sizeMb: Int) {
+        prefs.edit().putInt("setting_max_cache_mb", sizeMb).apply()
+    }
+
+    fun loadEqualizerBands(): List<Float> {
+        val raw = prefs.getString("setting_eq_bands", null) ?: return listOf(0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f)
+        return raw.split(",").mapNotNull { it.toFloatOrNull() }.takeIf { it.size == 10 }
+            ?: listOf(0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f)
+    }
+    fun saveEqualizerBands(bands: List<Float>) {
+        prefs.edit().putString("setting_eq_bands", bands.joinToString(",")).apply()
+    }
+
+    fun loadEqualizerPreamp(): Float = prefs.getFloat("setting_eq_preamp", 0f)
+    fun saveEqualizerPreamp(preampDb: Float) {
+        prefs.edit().putFloat("setting_eq_preamp", preampDb).apply()
+    }
+
+    fun loadEqualizerPreset(): String = prefs.getString("setting_eq_preset", "Flat") ?: "Flat"
+    fun saveEqualizerPreset(name: String) {
+        prefs.edit().putString("setting_eq_preset", name).apply()
     }
 }

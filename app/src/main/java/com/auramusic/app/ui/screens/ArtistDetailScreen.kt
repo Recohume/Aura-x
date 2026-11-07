@@ -59,12 +59,22 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.runtime.DisposableEffect
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.ui.AspectRatioFrameLayout
+import androidx.media3.ui.PlayerView
 import com.auramusic.app.core.media.AuraPlayerManager
 import com.auramusic.app.domain.model.ArtistCarouselItem
 import com.auramusic.app.domain.model.ArtistDetail
@@ -118,7 +128,7 @@ fun ArtistDetailScreen(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(290.dp)
+                        .height(430.dp)
                         .background(Color(0xFF161820))
                 ) {
                     if (artistDetail.bannerUrl.isNotBlank()) {
@@ -135,6 +145,11 @@ fun ArtistDetailScreen(
                                 .auraShimmer()
                         )
                     }
+
+                    ArtistMotionPlayer(
+                        motion = artistDetail.motion,
+                        modifier = Modifier.fillMaxSize()
+                    )
 
                     // Gradient overlay to darken bottom so text is crisp and readable
                     Box(
@@ -816,6 +831,68 @@ private fun ArtistPopularSongRow(
                 modifier = Modifier.size(20.dp)
             )
         }
+    }
+}
+
+@Composable
+private fun ArtistMotionPlayer(
+    motion: com.auramusic.app.domain.model.ArtistMotion?,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val usePortrait = context.resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_PORTRAIT
+    val videoUrl = if (usePortrait) motion?.squareVideoUrl ?: motion?.wideVideoUrl
+    else motion?.wideVideoUrl ?: motion?.squareVideoUrl
+    val previewUrl = if (usePortrait) motion?.squarePreviewUrl ?: motion?.widePreviewUrl
+    else motion?.widePreviewUrl ?: motion?.squarePreviewUrl
+    if (videoUrl.isNullOrBlank()) return
+
+    val exoPlayer = androidx.compose.runtime.remember(videoUrl) {
+        ExoPlayer.Builder(context).build().apply {
+            repeatMode = Player.REPEAT_MODE_ONE
+            volume = 0f
+            setMediaItem(MediaItem.fromUri(videoUrl))
+            prepare()
+            playWhenReady = true
+        }
+    }
+    DisposableEffect(exoPlayer, lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_START -> exoPlayer.playWhenReady = true
+                Lifecycle.Event.ON_STOP -> exoPlayer.playWhenReady = false
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            exoPlayer.release()
+        }
+    }
+
+    Box(modifier = modifier) {
+        if (!previewUrl.isNullOrBlank()) {
+            AsyncImage(
+                model = previewUrl,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
+        }
+        AndroidView(
+            modifier = Modifier.fillMaxSize(),
+            factory = { viewContext ->
+                PlayerView(viewContext).apply {
+                    useController = false
+                    resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+                    setShutterBackgroundColor(android.graphics.Color.TRANSPARENT)
+                    player = exoPlayer
+                }
+            },
+            update = { it.player = exoPlayer }
+        )
     }
 }
 

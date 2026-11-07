@@ -21,31 +21,45 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
+import androidx.compose.material.icons.automirrored.rounded.VolumeUp
 import androidx.compose.material.icons.rounded.Block
+import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Equalizer
 import androidx.compose.material.icons.rounded.GraphicEq
+import androidx.compose.material.icons.rounded.HighQuality
 import androidx.compose.material.icons.rounded.Lyrics
 import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.Storage
 import androidx.compose.material.icons.rounded.SystemUpdate
+import androidx.compose.material.icons.rounded.Timer
+import androidx.compose.material.icons.rounded.Translate
+import androidx.compose.material.icons.rounded.Tune
+import androidx.compose.material.icons.rounded.Videocam
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.RadioButtonDefaults
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -59,28 +73,87 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil.Coil
 import com.auramusic.app.R
 import com.auramusic.app.core.media.AuraPlayerManager
 import com.auramusic.app.domain.model.EqualizerPreset
 import com.auramusic.app.domain.model.NowPlayingStyle
-import com.auramusic.app.domain.model.SIMPMUSIC_EQ_PRESETS
 import com.auramusic.app.ui.AuraViewModel
+import com.auramusic.app.ui.components.EqualizerWaveSection
 import com.auramusic.app.ui.theme.AuraNeonLime
 import com.auramusic.app.ui.theme.SpotifyPitchBlack
 import com.auramusic.app.ui.theme.TextPrimary
 import com.auramusic.app.ui.theme.TextSecondary
+import java.io.File
+import kotlin.math.roundToInt
 
+private val AUDIO_QUALITY_OPTIONS = listOf(
+    "Auto" to "Auto (Adaptive highest quality)",
+    "High Opus - 256kbps" to "High Opus - 256kbps (YT Premium / Studio)",
+    "High AAC - 256kbps" to "High AAC - 256kbps (Apple / Universal)",
+    "Medium - 128-160kbps" to "Medium - 128-160kbps (Balanced)",
+    "Low - 66-96kbps" to "Low - 66-96kbps (Data Saver)"
+)
+
+private val VIDEO_QUALITY_OPTIONS = listOf(
+    "Auto (1080p)" to "Auto (Best available resolution)",
+    "1080p" to "1080p (Full High Definition)",
+    "720p" to "720p (High Definition)",
+    "480p" to "480p (Standard Definition)",
+    "360p" to "360p (Data Saver)"
+)
+
+private val ROMANIZATION_LANGUAGES = listOf(
+    "Japanese" to "Japanese (Romaji)",
+    "Korean" to "Korean (Revised Romanization)",
+    "Chinese" to "Chinese (Pinyin)",
+    "Hindi" to "Hindi (Latin transliteration)",
+    "Punjabi" to "Punjabi (Shahmukhi / Gurmukhi Latin)",
+    "Russian" to "Russian (Cyrillic to Latin)",
+    "Ukrainian" to "Ukrainian (Cyrillic to Latin)",
+    "Serbian" to "Serbian (Cyrillic to Latin)",
+    "Bulgarian" to "Bulgarian (Cyrillic to Latin)",
+    "Belarusian" to "Belarusian (Cyrillic to Latin)",
+    "Kyrgyz" to "Kyrgyz (Cyrillic to Latin)",
+    "Macedonian" to "Macedonian (Cyrillic to Latin)"
+)
+
+private val CACHE_LIMIT_OPTIONS = listOf(
+    512 to "512 MB",
+    1024 to "1 GB (Default)",
+    2048 to "2 GB",
+    5120 to "5 GB",
+    0 to "Unlimited"
+)
+
+@OptIn(coil.annotation.ExperimentalCoilApi::class)
 @Composable
 fun SettingsScreen(viewModel: AuraViewModel) {
     val context = LocalContext.current
     val nowPlayingStyle by viewModel.nowPlayingStyle.collectAsState()
     val showRomanized by viewModel.showRomanizedLyrics.collectAsState()
-    val sponsorBlockEnabled by AuraPlayerManager.sponsorBlockEnabled.collectAsState()
-    val eqEnabled by AuraPlayerManager.eqEnabled.collectAsState()
-    val activeEqPreset by AuraPlayerManager.activeEqPreset.collectAsState()
+    val romanizationLanguages by viewModel.romanizationLanguages.collectAsState()
     val downloads by viewModel.downloads.collectAsState()
 
-    var showEqPresets by remember { mutableStateOf(false) }
+    // AuraPlayerManager Settings State
+    val eqEnabled by AuraPlayerManager.eqEnabled.collectAsState()
+    val eqBands by AuraPlayerManager.equalizerBands.collectAsState()
+    val eqPreamp by AuraPlayerManager.equalizerPreamp.collectAsState()
+    val eqPresetName by AuraPlayerManager.activeEqPresetName.collectAsState()
+
+    val audioQuality by AuraPlayerManager.audioQuality.collectAsState()
+    val videoQuality by AuraPlayerManager.videoQuality.collectAsState()
+    val normalizeVolume by AuraPlayerManager.loudnessNormalization.collectAsState()
+    val skipSilence by AuraPlayerManager.skipSilence.collectAsState()
+    val crossfadeSeconds by AuraPlayerManager.crossfadeSeconds.collectAsState()
+    val sponsorBlockEnabled by AuraPlayerManager.sponsorBlockEnabled.collectAsState()
+    val maxCacheSizeMb by AuraPlayerManager.maxCacheSizeMb.collectAsState()
+
+    // Dialog Dialog States
+    var showAudioQualityDialog by remember { mutableStateOf(false) }
+    var showVideoQualityDialog by remember { mutableStateOf(false) }
+    var showRomanizationDialog by remember { mutableStateOf(false) }
+    var showCacheLimitDialog by remember { mutableStateOf(false) }
 
     val packageInfo = remember(context) {
         try {
@@ -97,14 +170,7 @@ fun SettingsScreen(viewModel: AuraViewModel) {
             null
         }
     }
-
-    val appVersionName = packageInfo?.versionName ?: "1.4.8"
-    val appVersionCode = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
-        packageInfo?.longVersionCode ?: 1L
-    } else {
-        @Suppress("DEPRECATION")
-        packageInfo?.versionCode?.toLong() ?: 1L
-    }
+    val appVersionName = packageInfo?.versionName ?: "1.5.0"
 
     LazyColumn(
         modifier = Modifier
@@ -118,15 +184,13 @@ fun SettingsScreen(viewModel: AuraViewModel) {
                 Text(
                     text = "Settings",
                     style = MaterialTheme.typography.headlineLarge,
-                    color = Color.White,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 30.sp
+                    color = Color.White
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = "Fidelity, playback & interface controls",
-                    color = TextSecondary,
-                    fontSize = 13.sp
+                    text = "Fidelity, audio processing & interface controls",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = TextSecondary
                 )
             }
         }
@@ -136,7 +200,6 @@ fun SettingsScreen(viewModel: AuraViewModel) {
             SettingsCategoryHeader(title = "Player appearance")
             Spacer(modifier = Modifier.height(10.dp))
 
-            // Modern containerless segmented pill toggle
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -169,68 +232,218 @@ fun SettingsScreen(viewModel: AuraViewModel) {
 
         // 3. Audio & Streaming Fidelity
         item {
-            SettingsCategoryHeader(title = "Audio & streaming")
+            SettingsCategoryHeader(title = "Audio & streaming fidelity")
             Spacer(modifier = Modifier.height(10.dp))
 
-            ModernSettingsRow(
+            // Sound Quality Selector
+            ModernClickableRow(
                 icon = Icons.Rounded.Speed,
                 title = "Audio Stream Quality",
-                subtitle = "Up to 256kbps direct stream (Opus / AAC)"
-            )
-
-            SettingsDivider()
-
-            ModernClickableRow(
-                icon = Icons.Rounded.Equalizer,
-                title = "10-Band Equalizer",
-                subtitle = if (eqEnabled) "Preset: ${activeEqPreset.name}" else "Hardware curve bypass",
-                onClick = { showEqPresets = !showEqPresets },
+                subtitle = AUDIO_QUALITY_OPTIONS.firstOrNull { it.first == audioQuality }?.second
+                    ?: "Up to 256kbps direct stream (Opus / AAC)",
+                onClick = { showAudioQualityDialog = true },
                 trailingContent = {
                     Icon(
                         imageVector = Icons.AutoMirrored.Rounded.KeyboardArrowRight,
-                        contentDescription = "Select EQ Preset",
+                        contentDescription = "Select Audio Quality",
                         tint = TextSecondary,
                         modifier = Modifier.size(20.dp)
                     )
                 }
             )
 
+            SettingsDivider()
+
+            // Video Quality Selector
+            ModernClickableRow(
+                icon = Icons.Rounded.Videocam,
+                title = "Video Stream Quality",
+                subtitle = VIDEO_QUALITY_OPTIONS.firstOrNull { it.first == videoQuality }?.second
+                    ?: "Up to 1080p Full HD video stream",
+                onClick = { showVideoQualityDialog = true },
+                trailingContent = {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Rounded.KeyboardArrowRight,
+                        contentDescription = "Select Video Quality",
+                        tint = TextSecondary,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            )
+
+            SettingsDivider()
+
+            // 10-Band Equalizer Toggle
+            ModernSwitchRow(
+                icon = Icons.Rounded.Equalizer,
+                title = "10-Band Equalizer",
+                subtitle = if (eqEnabled) "Custom wave curve active ($eqPresetName)" else "Hardware curve bypass",
+                checked = eqEnabled,
+                onCheckedChange = { AuraPlayerManager.setEqualizerEnabled(it) }
+            )
+
+            // Interactive Frequency Wave Curve & Presets (when enabled)
             AnimatedVisibility(
-                visible = showEqPresets,
-                enter = fadeIn(tween(180)),
-                exit = fadeOut(tween(140))
+                visible = eqEnabled,
+                enter = fadeIn(tween(200)),
+                exit = fadeOut(tween(150))
             ) {
-                LazyRow(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.padding(top = 10.dp, bottom = 4.dp, start = 48.dp)
-                ) {
-                    items(SIMPMUSIC_EQ_PRESETS, key = { it.id }) { preset ->
-                        val isCurrent = activeEqPreset.id == preset.id
-                        Surface(
-                            onClick = { viewModel.selectEqualizerPreset(preset) },
-                            shape = RoundedCornerShape(18.dp),
-                            color = if (isCurrent) Color(0xFF2E3240) else Color(0xFF16181F)
-                        ) {
-                            Text(
-                                text = preset.name,
-                                color = Color.White,
-                                fontSize = 11.5.sp,
-                                fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.SemiBold,
-                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp)
-                            )
-                        }
-                    }
+                Column(modifier = Modifier.padding(top = 10.dp, bottom = 4.dp)) {
+                    EqualizerWaveSection(
+                        bands = eqBands,
+                        preampDb = eqPreamp,
+                        presetName = eqPresetName,
+                        onBandsChange = { AuraPlayerManager.setEqualizerBands(it) },
+                        onPreampChange = { AuraPlayerManager.setEqualizerPreamp(it) },
+                        onPresetSelect = { AuraPlayerManager.applyEqualizerPreset(it) },
+                        onReset = { AuraPlayerManager.resetEqualizer() }
+                    )
                 }
             }
 
             Spacer(modifier = Modifier.height(30.dp))
         }
 
-        // 4. Playback & Automation
+        // 4. Lyrics & Romanization
         item {
-            SettingsCategoryHeader(title = "Playback & automation")
+            SettingsCategoryHeader(title = "Lyrics & romanization")
             Spacer(modifier = Modifier.height(10.dp))
 
+            ModernSwitchRow(
+                icon = Icons.Rounded.Lyrics,
+                title = "Romanized Lyrics",
+                subtitle = "Transliterate non-Latin scripts to Latin alphabet",
+                checked = showRomanized,
+                onCheckedChange = { viewModel.toggleRomanizedLyrics() }
+            )
+
+            AnimatedVisibility(
+                visible = showRomanized,
+                enter = fadeIn(tween(180)),
+                exit = fadeOut(tween(140))
+            ) {
+                Column {
+                    SettingsDivider()
+                    val langCount = romanizationLanguages.size
+                    val langSummary = if (langCount == ROMANIZATION_LANGUAGES.size) {
+                        "All 12 languages enabled"
+                    } else if (langCount > 0) {
+                        romanizationLanguages.take(3).joinToString(", ") + if (langCount > 3) " +${langCount - 3} more" else ""
+                    } else {
+                        "None selected"
+                    }
+
+                    ModernClickableRow(
+                        icon = Icons.Rounded.Translate,
+                        title = "Romanization Languages",
+                        subtitle = langSummary,
+                        onClick = { showRomanizationDialog = true },
+                        trailingContent = {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Rounded.KeyboardArrowRight,
+                                contentDescription = "Select Languages",
+                                tint = TextSecondary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(30.dp))
+        }
+
+        // 5. Playback & Audio Processing
+        item {
+            SettingsCategoryHeader(title = "Playback & audio processing")
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Normalize volume (ReplayGain / Loudness Normalization)
+            ModernSwitchRow(
+                icon = Icons.AutoMirrored.Rounded.VolumeUp,
+                title = "Normalize Volume",
+                subtitle = "Balance media loudness across tracks (ReplayGain)",
+                checked = normalizeVolume,
+                onCheckedChange = { AuraPlayerManager.setLoudnessNormalization(it) }
+            )
+
+            SettingsDivider()
+
+            // Skip silence
+            ModernSwitchRow(
+                icon = Icons.Rounded.GraphicEq,
+                title = "Skip Silence",
+                subtitle = "Skip silent parts and long dead air automatically",
+                checked = skipSilence,
+                onCheckedChange = { AuraPlayerManager.setSkipSilence(it) }
+            )
+
+            SettingsDivider()
+
+            // Crossfade duration slider
+            Column(modifier = Modifier.padding(vertical = 10.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .background(Color.White.copy(alpha = 0.05f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Timer,
+                                contentDescription = null,
+                                tint = Color.White.copy(alpha = 0.85f),
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column {
+                            Text(
+                                text = "Crossfade Duration",
+                                color = Color.White,
+                                style = MaterialTheme.typography.labelLarge
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = if (crossfadeSeconds == 0) "Off (Immediate gapless)" else "$crossfadeSeconds seconds overlap",
+                                color = TextSecondary,
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                    }
+                    Text(
+                        text = "${crossfadeSeconds}s",
+                        color = AuraNeonLime,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 13.sp
+                    )
+                }
+
+                Slider(
+                    value = crossfadeSeconds.toFloat(),
+                    onValueChange = { AuraPlayerManager.setCrossfadeSeconds(it.roundToInt()) },
+                    valueRange = 0f..12f,
+                    steps = 11,
+                    colors = SliderDefaults.colors(
+                        thumbColor = AuraNeonLime,
+                        activeTrackColor = AuraNeonLime,
+                        inactiveTrackColor = Color(0xFF262933)
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 48.dp, end = 6.dp, top = 2.dp)
+                )
+            }
+
+            SettingsDivider()
+
+            // SponsorBlock Integration
             ModernSwitchRow(
                 icon = Icons.Rounded.Block,
                 title = "SponsorBlock Integration",
@@ -239,28 +452,57 @@ fun SettingsScreen(viewModel: AuraViewModel) {
                 onCheckedChange = { AuraPlayerManager.setSponsorBlockEnabled(it) }
             )
 
-            SettingsDivider()
-
-            ModernSwitchRow(
-                icon = Icons.Rounded.Lyrics,
-                title = "Romanized Lyrics",
-                subtitle = "Transliterate Asian lyrics to Latin alphabet",
-                checked = showRomanized,
-                onCheckedChange = { viewModel.toggleRomanizedLyrics() }
-            )
-
             Spacer(modifier = Modifier.height(30.dp))
         }
 
-        // 5. Storage & Cache
+        // 6. Storage & Cache
         item {
-            SettingsCategoryHeader(title = "Storage & data")
+            SettingsCategoryHeader(title = "Storage & cache")
             Spacer(modifier = Modifier.height(10.dp))
 
             ModernSettingsRow(
                 icon = Icons.Rounded.Storage,
                 title = "Offline Downloads",
-                subtitle = "${downloads.size} tracks cached locally",
+                subtitle = "${downloads.size} tracks cached for offline playback",
+                trailingContent = { }
+            )
+
+            SettingsDivider()
+
+            val cacheLimitLabel = CACHE_LIMIT_OPTIONS.firstOrNull { it.first == maxCacheSizeMb }?.second ?: "$maxCacheSizeMb MB"
+            ModernClickableRow(
+                icon = Icons.Rounded.Tune,
+                title = "Player Cache Limit",
+                subtitle = "Max disk allocation for fast scrubbing: $cacheLimitLabel",
+                onClick = { showCacheLimitDialog = true },
+                trailingContent = {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Rounded.KeyboardArrowRight,
+                        contentDescription = "Set Cache Limit",
+                        tint = TextSecondary,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            )
+
+            SettingsDivider()
+
+            ModernClickableRow(
+                icon = Icons.Rounded.DeleteOutline,
+                title = "Clear Media Stream Cache",
+                subtitle = "Release audio fragments and video segments",
+                onClick = {
+                    try {
+                        val cacheDir = File(context.cacheDir, "aura_media3_cache")
+                        if (cacheDir.exists()) {
+                            cacheDir.deleteRecursively()
+                            cacheDir.mkdirs()
+                        }
+                        Toast.makeText(context, "Stream cache successfully emptied", Toast.LENGTH_SHORT).show()
+                    } catch (e: Exception) {
+                        Toast.makeText(context, "Cache clear notice: ${e.message}", Toast.LENGTH_SHORT).show()
+                    }
+                },
                 trailingContent = { }
             )
 
@@ -268,10 +510,17 @@ fun SettingsScreen(viewModel: AuraViewModel) {
 
             ModernClickableRow(
                 icon = Icons.Rounded.DeleteOutline,
-                title = "Clear Media Cache",
-                subtitle = "Release temporary cover arts and audio buffers",
+                title = "Clear Image & Artwork Cache",
+                subtitle = "Release album covers and cached artist avatars",
                 onClick = {
-                    Toast.makeText(context, "Stream cache successfully cleared", Toast.LENGTH_SHORT).show()
+                    try {
+                        val imageLoader = Coil.imageLoader(context)
+                        imageLoader.diskCache?.clear()
+                        imageLoader.memoryCache?.clear()
+                        Toast.makeText(context, "Artwork cache successfully cleared", Toast.LENGTH_SHORT).show()
+                    } catch (e: Exception) {
+                        Toast.makeText(context, "Notice: ${e.message}", Toast.LENGTH_SHORT).show()
+                    }
                 },
                 trailingContent = { }
             )
@@ -279,7 +528,7 @@ fun SettingsScreen(viewModel: AuraViewModel) {
             Spacer(modifier = Modifier.height(34.dp))
         }
 
-        // 5b. Updates & Notifications
+        // 7. Updates & Notifications
         item {
             SettingsCategoryHeader(title = "Updates & notifications")
             Spacer(modifier = Modifier.height(10.dp))
@@ -288,9 +537,7 @@ fun SettingsScreen(viewModel: AuraViewModel) {
                 icon = Icons.Rounded.SystemUpdate,
                 title = "Check for Updates",
                 subtitle = "Query GitHub Releases directly for new APK builds",
-                onClick = {
-                    viewModel.checkForUpdates(force = true)
-                },
+                onClick = { viewModel.checkForUpdates(force = true) },
                 trailingContent = {
                     Icon(
                         imageVector = Icons.AutoMirrored.Rounded.KeyboardArrowRight,
@@ -306,14 +553,14 @@ fun SettingsScreen(viewModel: AuraViewModel) {
             ModernSettingsRow(
                 icon = Icons.Rounded.Notifications,
                 title = "Release Push Notifications",
-                subtitle = "Receive FCM alerts when new versions are published",
+                subtitle = "Receive alerts when new builds are published",
                 trailingContent = { }
             )
 
             Spacer(modifier = Modifier.height(30.dp))
         }
 
-        // 6. About Aura (Clean minimal lockup with official Aura Logo & dynamic version)
+        // 8. About Aura
         item {
             Row(
                 modifier = Modifier
@@ -338,7 +585,7 @@ fun SettingsScreen(viewModel: AuraViewModel) {
                     )
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(
-                        text = "YouTube Music InnerTube & SimpMusic Core • 0% Ads",
+                        text = "SimpMusic & YouTube Music Engine • 0% AI Slop",
                         color = TextSecondary,
                         fontSize = 12.sp
                     )
@@ -346,15 +593,228 @@ fun SettingsScreen(viewModel: AuraViewModel) {
             }
         }
     }
+
+    // --- DIALOGS ---
+
+    // 1. Audio Stream Quality Dialog
+    if (showAudioQualityDialog) {
+        AlertDialog(
+            onDismissRequest = { showAudioQualityDialog = false },
+            title = {
+                Text(text = "Audio Stream Quality", color = Color.White, fontWeight = FontWeight.Bold)
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    AUDIO_QUALITY_OPTIONS.forEach { (key, label) ->
+                        val isSelected = audioQuality == key
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable {
+                                    AuraPlayerManager.setAudioQuality(key)
+                                    showAudioQualityDialog = false
+                                }
+                                .padding(vertical = 8.dp, horizontal = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(
+                                selected = isSelected,
+                                onClick = {
+                                    AuraPlayerManager.setAudioQuality(key)
+                                    showAudioQualityDialog = false
+                                },
+                                colors = RadioButtonDefaults.colors(
+                                    selectedColor = AuraNeonLime,
+                                    unselectedColor = TextSecondary
+                                )
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = label,
+                                color = if (isSelected) AuraNeonLime else Color.White,
+                                fontSize = 13.5.sp,
+                                fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showAudioQualityDialog = false }) {
+                    Text("Cancel", color = TextSecondary)
+                }
+            },
+            containerColor = Color(0xFF181A22),
+            shape = RoundedCornerShape(16.dp)
+        )
+    }
+
+    // 2. Video Stream Quality Dialog
+    if (showVideoQualityDialog) {
+        AlertDialog(
+            onDismissRequest = { showVideoQualityDialog = false },
+            title = {
+                Text(text = "Video Stream Quality", color = Color.White, fontWeight = FontWeight.Bold)
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    VIDEO_QUALITY_OPTIONS.forEach { (key, label) ->
+                        val isSelected = videoQuality == key
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable {
+                                    AuraPlayerManager.setVideoQuality(key)
+                                    showVideoQualityDialog = false
+                                }
+                                .padding(vertical = 8.dp, horizontal = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(
+                                selected = isSelected,
+                                onClick = {
+                                    AuraPlayerManager.setVideoQuality(key)
+                                    showVideoQualityDialog = false
+                                },
+                                colors = RadioButtonDefaults.colors(
+                                    selectedColor = AuraNeonLime,
+                                    unselectedColor = TextSecondary
+                                )
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = label,
+                                color = if (isSelected) AuraNeonLime else Color.White,
+                                fontSize = 13.5.sp,
+                                fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showVideoQualityDialog = false }) {
+                    Text("Cancel", color = TextSecondary)
+                }
+            },
+            containerColor = Color(0xFF181A22),
+            shape = RoundedCornerShape(16.dp)
+        )
+    }
+
+    // 3. Romanization Languages Multi-Select Dialog
+    if (showRomanizationDialog) {
+        AlertDialog(
+            onDismissRequest = { showRomanizationDialog = false },
+            title = {
+                Text(text = "Romanization Languages", color = Color.White, fontWeight = FontWeight.Bold)
+            },
+            text = {
+                LazyColumn(modifier = Modifier.height(320.dp)) {
+                    items(ROMANIZATION_LANGUAGES.size) { index ->
+                        val (key, label) = ROMANIZATION_LANGUAGES[index]
+                        val isChecked = romanizationLanguages.contains(key)
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable { viewModel.toggleRomanizationLanguage(key) }
+                                .padding(vertical = 6.dp, horizontal = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Checkbox(
+                                checked = isChecked,
+                                onCheckedChange = { viewModel.toggleRomanizationLanguage(key) },
+                                colors = CheckboxDefaults.colors(
+                                    checkedColor = AuraNeonLime,
+                                    checkmarkColor = Color.Black,
+                                    uncheckedColor = TextSecondary
+                                )
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = label,
+                                color = if (isChecked) Color.White else TextSecondary,
+                                fontSize = 13.5.sp,
+                                fontWeight = if (isChecked) FontWeight.SemiBold else FontWeight.Normal
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showRomanizationDialog = false }) {
+                    Text("Done", color = AuraNeonLime, fontWeight = FontWeight.Bold)
+                }
+            },
+            containerColor = Color(0xFF181A22),
+            shape = RoundedCornerShape(16.dp)
+        )
+    }
+
+    // 4. Cache Limit Dialog
+    if (showCacheLimitDialog) {
+        AlertDialog(
+            onDismissRequest = { showCacheLimitDialog = false },
+            title = {
+                Text(text = "Player Cache Limit", color = Color.White, fontWeight = FontWeight.Bold)
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    CACHE_LIMIT_OPTIONS.forEach { (sizeMb, label) ->
+                        val isSelected = maxCacheSizeMb == sizeMb
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable {
+                                    AuraPlayerManager.setMaxCacheSizeMb(sizeMb)
+                                    showCacheLimitDialog = false
+                                }
+                                .padding(vertical = 8.dp, horizontal = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(
+                                selected = isSelected,
+                                onClick = {
+                                    AuraPlayerManager.setMaxCacheSizeMb(sizeMb)
+                                    showCacheLimitDialog = false
+                                },
+                                colors = RadioButtonDefaults.colors(
+                                    selectedColor = AuraNeonLime,
+                                    unselectedColor = TextSecondary
+                                )
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = label,
+                                color = if (isSelected) AuraNeonLime else Color.White,
+                                fontSize = 13.5.sp,
+                                fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showCacheLimitDialog = false }) {
+                    Text("Cancel", color = TextSecondary)
+                }
+            },
+            containerColor = Color(0xFF181A22),
+            shape = RoundedCornerShape(16.dp)
+        )
+    }
 }
 
 @Composable
 private fun SettingsCategoryHeader(title: String) {
     Text(
-        text = title,
+        text = title.uppercase(),
         color = TextSecondary,
-        fontWeight = FontWeight.Bold,
-        fontSize = 12.sp,
+        style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.5.sp),
         letterSpacing = 0.8.sp,
         modifier = Modifier.padding(start = 2.dp)
     )
@@ -406,14 +866,13 @@ private fun ModernSettingsRow(
                 Text(
                     text = title,
                     color = Color.White,
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 14.sp
+                    style = MaterialTheme.typography.labelLarge
                 )
                 Spacer(modifier = Modifier.height(2.dp))
                 Text(
                     text = subtitle,
                     color = TextSecondary,
-                    fontSize = 12.sp
+                    style = MaterialTheme.typography.bodySmall
                 )
             }
         }
@@ -461,14 +920,13 @@ private fun ModernClickableRow(
                 Text(
                     text = title,
                     color = Color.White,
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 14.sp
+                    style = MaterialTheme.typography.labelLarge
                 )
                 Spacer(modifier = Modifier.height(2.dp))
                 Text(
                     text = subtitle,
                     color = TextSecondary,
-                    fontSize = 12.sp
+                    style = MaterialTheme.typography.bodySmall
                 )
             }
         }
@@ -514,14 +972,13 @@ private fun ModernSwitchRow(
                 Text(
                     text = title,
                     color = Color.White,
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 14.sp
+                    style = MaterialTheme.typography.labelLarge
                 )
                 Spacer(modifier = Modifier.height(2.dp))
                 Text(
                     text = subtitle,
                     color = TextSecondary,
-                    fontSize = 12.sp
+                    style = MaterialTheme.typography.bodySmall
                 )
             }
         }

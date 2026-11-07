@@ -5,7 +5,10 @@ import com.auramusic.app.domain.model.ArtistDetail
 import com.auramusic.app.domain.model.ArtistSong
 import com.auramusic.app.domain.model.AuraPlaylist
 import com.auramusic.app.domain.model.AuraTrack
+import com.auramusic.app.domain.model.AuraVideoInfo
+import com.auramusic.app.domain.model.MoodBrowseResult
 import com.auramusic.app.domain.model.MoodCategory
+import com.auramusic.app.domain.model.YtmMoodBrowseParams
 import com.auramusic.app.domain.model.PlaylistDetail
 import com.auramusic.app.domain.model.PlaylistTrackItem
 import com.auramusic.app.domain.model.ResolvedVideoStream
@@ -72,6 +75,7 @@ object SimpMusicExtractorEngine {
     private val streamCache = ConcurrentHashMap<String, ResolvedStream>()
     // Tier 0 In-memory Resolved Video Stream Cache (videoId -> ResolvedVideoStream)
     private val videoStreamCache = ConcurrentHashMap<String, ResolvedVideoStream>()
+    private val videoInfoCache = ConcurrentHashMap<String, AuraVideoInfo>()
 
     val httpClient: OkHttpClient by lazy {
         OkHttpClient.Builder()
@@ -970,6 +974,99 @@ object SimpMusicExtractorEngine {
         }
     }
 
+    /** Fetches video owner and description fields from the YouTube NEXT response used by
+     * SimpMusic for its now-playing information card. */
+    suspend fun fetchVideoInfo(videoId: String): AuraVideoInfo? = withContext(Dispatchers.IO) {
+        if (videoId.isBlank()) return@withContext null
+        videoInfoCache[videoId]?.let { return@withContext it }
+        runCatching {
+            val payload = JSONObject().apply {
+                put("context", JSONObject().apply {
+                    put("client", JSONObject().apply {
+                        // SimpMusic's getSongInfo uses WEB. WEB_REMIX can return a different
+                        // page shape, which does not reliably include the secondary renderer.
+                        put("clientName", "WEB")
+                        put("clientVersion", "2.20250312.04.00")
+                        put("hl", "en")
+                        put("gl", "US")
+                    })
+                })
+                put("videoId", videoId)
+            }
+            val request = Request.Builder()
+                .url("https://music.youtube.com/youtubei/v1/next?prettyPrint=false")
+                .header("User-Agent", USER_AGENT)
+                .header("Origin", "https://music.youtube.com")
+                .post(payload.toString().toRequestBody("application/json".toMediaType()))
+                .build()
+
+            httpClient.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return@use null
+                val root = JSONObject(response.body?.string().orEmpty())
+                val contents = root.optJSONObject("contents")
+                val results = contents
+                    ?.optJSONObject("twoColumnWatchNextResults")
+                    ?.optJSONObject("results")
+                    ?.optJSONObject("results")
+                    ?.optJSONArray("contents")
+                var secondary: JSONObject? = null
+                var primary: JSONObject? = null
+                if (results != null) {
+                    for (i in 0 until results.length()) {
+                        val item = results.optJSONObject(i) ?: continue
+                        item.optJSONObject("videoSecondaryInfoRenderer")?.let { secondary = it }
+                        item.optJSONObject("videoPrimaryInfoRenderer")?.let { primary = it }
+                    }
+                }
+                // Keep compatibility with single-column and nested response variants as well.
+                findRenderer(root, "videoSecondaryInfoRenderer")?.let { secondary = it }
+                findRenderer(root, "videoPrimaryInfoRenderer")?.let { primary = it }
+                if (secondary == null && primary == null) return@use null
+                val owner = secondary?.optJSONObject("owner")?.optJSONObject("videoOwnerRenderer")
+                val thumbnailSet = owner?.optJSONObject("thumbnail")?.optJSONArray("thumbnails")
+                val thumbnail = thumbnailSet?.let { thumbs ->
+                    (thumbs.length() - 1 downTo 0).firstNotNullOfOrNull { index ->
+                        thumbs.optJSONObject(index)?.optString("url")?.takeIf(String::isNotBlank)
+                    }
+                }?.replace(Regex("=s\\d+.*$"), "=s960")
+                val author = owner?.optJSONObject("title")?.optJSONArray("runs")
+                    ?.optJSONObject(0)?.optString("text").orEmpty()
+                    .replace(" - Topic", "")
+                val info = AuraVideoInfo(
+                    videoId = videoId,
+                    author = author,
+                    authorId = owner?.optJSONObject("navigationEndpoint")
+                        ?.optJSONObject("browseEndpoint")?.optString("browseId"),
+                    authorThumbnail = thumbnail,
+                    description = secondary?.optJSONObject("attributedDescription")
+                        ?.optString("content").orEmpty(),
+                    subscribers = owner?.optJSONObject("subscriberCountText")
+                        ?.optString("simpleText").orEmpty(),
+                    uploadDate = primary?.optJSONObject("dateText")?.optString("simpleText").orEmpty()
+                )
+                // An empty result usually means the request/response shape failed. Do not
+                // poison the in-memory cache; a later request can retry after a transient miss.
+                if (info.description.isNotBlank() || info.author.isNotBlank() || info.uploadDate.isNotBlank()) {
+                    videoInfoCache[videoId] = info
+                    info
+                } else {
+                    null
+                }
+            }
+        }.getOrNull()
+    }
+
+    private fun findRenderer(value: Any?, rendererName: String): JSONObject? = when (value) {
+        is JSONObject -> {
+            value.optJSONObject(rendererName)
+                ?: value.keys().asSequence().mapNotNull { key -> findRenderer(value.opt(key), rendererName) }.firstOrNull()
+        }
+        is JSONArray -> (0 until value.length()).asSequence()
+            .mapNotNull { index -> findRenderer(value.opt(index), rendererName) }
+            .firstOrNull()
+        else -> null
+    }
+
     /**
      * Fetches curated YouTube Music Charts & Moods for the Home screen.
      */
@@ -1027,6 +1124,208 @@ object SimpMusicExtractorEngine {
 
             Pair(sections, moods)
         }
+
+    /**
+     * Directly calls YouTube Music InnerTube browse API with official mood/moment params
+     * (`browseId = "FEmusic_home"`), fetching the official backdrop image, quick picks, and shelves.
+     */
+    suspend fun fetchYtmMoodBrowse(category: String): MoodBrowseResult = withContext(Dispatchers.IO) {
+        val params = YtmMoodBrowseParams.PARAMS_MAP[category]
+        val fallbackBg = YtmMoodBrowseParams.DEFAULT_BACKGROUNDS[category]
+        if (params == null) {
+            return@withContext MoodBrowseResult(fallbackBg, emptyList())
+        }
+
+        try {
+            val payload = JSONObject().apply {
+                put("context", JSONObject().apply {
+                    put("client", JSONObject().apply {
+                        put("clientName", "WEB_REMIX")
+                        put("clientVersion", "1.20250312.01.00")
+                        put("hl", "en")
+                        put("gl", "US")
+                    })
+                })
+                put("browseId", "FEmusic_home")
+                put("params", params)
+            }
+
+            val req = Request.Builder()
+                .url("https://music.youtube.com/youtubei/v1/browse?prettyPrint=false")
+                .header("User-Agent", USER_AGENT)
+                .header("Origin", "https://music.youtube.com")
+                .header("Referer", "https://music.youtube.com/")
+                .post(payload.toString().toRequestBody("application/json".toMediaType()))
+                .build()
+
+            httpClient.newCall(req).execute().use { resp ->
+                if (resp.isSuccessful) {
+                    val bodyStr = resp.body?.string() ?: ""
+                    val root = JSONObject(bodyStr)
+                    val bgThumbs = root.optJSONObject("background")
+                        ?.optJSONObject("musicThumbnailRenderer")
+                        ?.optJSONObject("thumbnail")
+                        ?.optJSONArray("thumbnails")
+                    // Always prefer curated dark night/sunset mood backgrounds over YTM's bright daytime images
+                    val bgUrl = fallbackBg ?: bgThumbs?.let {
+                        if (it.length() > 0) it.optJSONObject(it.length() - 1)?.optString("url") else null
+                    }
+
+                    val parsedTracks = mutableListOf<AuraTrack>()
+                    val parsedAlbums = mutableListOf<AuraTrack>()
+
+                    val sections = root.optJSONObject("contents")
+                        ?.optJSONObject("singleColumnBrowseResultsRenderer")
+                        ?.optJSONArray("tabs")
+                        ?.optJSONObject(0)
+                        ?.optJSONObject("tabRenderer")
+                        ?.optJSONObject("content")
+                        ?.optJSONObject("sectionListRenderer")
+                        ?.optJSONArray("contents")
+
+                    if (sections != null) {
+                        for (s in 0 until sections.length()) {
+                            val sec = sections.optJSONObject(s) ?: continue
+                            val shelf = sec.optJSONObject("musicCarouselShelfRenderer") ?: continue
+                            val contents = shelf.optJSONArray("contents") ?: continue
+                            for (i in 0 until contents.length()) {
+                                val item = contents.optJSONObject(i) ?: continue
+                                val resItem = item.optJSONObject("musicResponsiveListItemRenderer")
+                                if (resItem != null) {
+                                    val flexCols = resItem.optJSONArray("flexColumns") ?: continue
+                                    val firstRun = flexCols.optJSONObject(0)
+                                        ?.optJSONObject("musicResponsiveListItemFlexColumnRenderer")
+                                        ?.optJSONObject("text")
+                                        ?.optJSONArray("runs")
+                                        ?.optJSONObject(0)
+                                    val songTitle = firstRun?.optString("text") ?: continue
+                                    val vidId = resItem.optJSONObject("playlistItemData")?.optString("videoId")
+                                        ?.takeIf { it.isNotBlank() }
+                                        ?: resItem.optJSONObject("overlay")
+                                            ?.optJSONObject("musicItemThumbnailOverlayRenderer")
+                                            ?.optJSONObject("content")
+                                            ?.optJSONObject("musicPlayButtonRenderer")
+                                            ?.optJSONObject("playNavigationEndpoint")
+                                            ?.optJSONObject("watchEndpoint")
+                                            ?.optString("videoId")
+                                            ?.takeIf { it.isNotBlank() }
+                                        ?: continue
+
+                                    val subRuns = flexCols.optJSONObject(1)
+                                        ?.optJSONObject("musicResponsiveListItemFlexColumnRenderer")
+                                        ?.optJSONObject("text")
+                                        ?.optJSONArray("runs")
+                                    var songArtist = "YouTube Artist"
+                                    var songAlbum = "YouTube Music"
+                                    if (subRuns != null) {
+                                        val texts = mutableListOf<String>()
+                                        for (r in 0 until subRuns.length()) {
+                                            val t = subRuns.optJSONObject(r)?.optString("text")?.trim().orEmpty()
+                                            if (t.isNotEmpty() && t != "•" && t != "&") texts.add(t)
+                                        }
+                                        if (texts.isNotEmpty()) {
+                                            songArtist = if (texts[0].equals("Song", ignoreCase = true) || texts[0].equals("Video", ignoreCase = true)) {
+                                                texts.getOrNull(1) ?: "YouTube Artist"
+                                            } else texts[0]
+                                            if (texts.size > 2) {
+                                                songAlbum = texts[1]
+                                            }
+                                        }
+                                    }
+                                    val thumbs = resItem.optJSONObject("thumbnail")
+                                        ?.optJSONObject("musicThumbnailRenderer")
+                                        ?.optJSONObject("thumbnail")
+                                        ?.optJSONArray("thumbnails")
+                                    val thumb = thumbs?.let {
+                                        if (it.length() > 0) it.optJSONObject(it.length() - 1)?.optString("url") else null
+                                    } ?: "https://img.youtube.com/vi/$vidId/hqdefault.jpg"
+
+                                    parsedTracks.add(
+                                        AuraTrack(
+                                            id = "yt_$vidId",
+                                            videoId = vidId,
+                                            title = songTitle,
+                                            artist = songArtist,
+                                            album = songAlbum,
+                                            artworkUrl = thumb,
+                                            genre = category
+                                        )
+                                    )
+                                }
+                                val twoRow = item.optJSONObject("musicTwoRowItemRenderer")
+                                if (twoRow != null) {
+                                    val cardTitle = twoRow.optJSONObject("title")
+                                        ?.optJSONArray("runs")?.optJSONObject(0)?.optString("text") ?: continue
+                                    val subText = twoRow.optJSONObject("subtitle")
+                                        ?.optJSONArray("runs")?.optJSONObject(0)?.optString("text") ?: "YouTube Music"
+                                    val thumbs = twoRow.optJSONObject("thumbnailRenderer")
+                                        ?.optJSONObject("musicThumbnailRenderer")
+                                        ?.optJSONObject("thumbnail")
+                                        ?.optJSONArray("thumbnails")
+                                    val thumb = thumbs?.let {
+                                        if (it.length() > 0) it.optJSONObject(it.length() - 1)?.optString("url") else null
+                                    } ?: ""
+                                    val navWatch = twoRow.optJSONObject("navigationEndpoint")?.optJSONObject("watchEndpoint")
+                                    val vidId = navWatch?.optString("videoId")?.takeIf { it.isNotBlank() }
+                                    if (vidId != null) {
+                                        parsedTracks.add(
+                                            AuraTrack(
+                                                id = "yt_$vidId",
+                                                videoId = vidId,
+                                                title = cardTitle,
+                                                artist = subText,
+                                                album = category,
+                                                artworkUrl = thumb,
+                                                genre = category
+                                            )
+                                        )
+                                    } else {
+                                        val browseId = twoRow.optJSONObject("navigationEndpoint")?.optJSONObject("browseEndpoint")?.optString("browseId").orEmpty()
+                                        if (browseId.isNotBlank()) {
+                                            parsedAlbums.add(
+                                                AuraTrack(
+                                                    id = "yt_album_$browseId",
+                                                    videoId = browseId,
+                                                    title = cardTitle,
+                                                    artist = subText,
+                                                    album = category,
+                                                    artworkUrl = thumb,
+                                                    genre = category
+                                                )
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    val finalTracks = if (parsedTracks.isNotEmpty()) {
+                        parsedTracks.distinctBy { it.videoId }
+                    } else {
+                        searchYouTubeMusic("$category songs official audio", "songs").take(30)
+                    }
+
+                    MoodBrowseResult(
+                        backgroundUrl = bgUrl,
+                        tracks = finalTracks,
+                        albums = parsedAlbums.distinctBy { it.id }
+                    )
+                } else {
+                    MoodBrowseResult(
+                        backgroundUrl = fallbackBg,
+                        tracks = searchYouTubeMusic("$category songs official audio", "songs").take(30)
+                    )
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "fetchYtmMoodBrowse failed for $category: ${e.message}")
+            MoodBrowseResult(
+                backgroundUrl = fallbackBg,
+                tracks = searchYouTubeMusic("$category songs official audio", "songs").take(30)
+            )
+        }
+    }
 
     /**
      * Fetches live Global Top Artists from YouTube Music Charts (`FEmusic_charts`).
@@ -1808,6 +2107,7 @@ object SimpMusicExtractorEngine {
         var browseId = artist.id
         var bannerUrl = artist.avatarUrl
         var subsCount = artist.subscribers
+        var artistDescription = ""
 
         if (browseId.isBlank()) {
             val resolved = searchArtist(artist.name)
@@ -1883,6 +2183,13 @@ object SimpMusicExtractorEngine {
                                 "$clean subscribers"
                             }
                         }
+
+                        artistDescription = header?.optJSONObject("description")?.let { desc ->
+                            val runs = desc.optJSONArray("runs")
+                            if (runs != null) (0 until runs.length()).joinToString("") { i ->
+                                runs.optJSONObject(i)?.optString("text").orEmpty()
+                            } else desc.optString("simpleText", "")
+                        }.orEmpty()
 
                         val contents = root.optJSONObject("contents")
                             ?.optJSONObject("singleColumnBrowseResultsRenderer")
@@ -2232,7 +2539,8 @@ object SimpMusicExtractorEngine {
             bannerUrl = bannerUrl,
             topSongs = topSongs,
             albums = albums,
-            carousels = carousels
+            carousels = carousels,
+            description = artistDescription
         )
     }
 

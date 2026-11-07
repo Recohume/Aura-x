@@ -1,0 +1,141 @@
+package com.auramusic.app.ui.components
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.Forum
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImage
+import com.auramusic.app.domain.model.AuraCommentsPage
+import com.auramusic.app.domain.model.AuraTrack
+import com.auramusic.app.ui.theme.TextSecondary
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun AuraCommentsBottomSheet(
+    track: AuraTrack,
+    page: AuraCommentsPage?,
+    isLoading: Boolean,
+    error: String?,
+    onRetry: () -> Unit,
+    onLoadMore: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = Color(0xFF1B1D22),
+        dragHandle = {
+            Box(
+                modifier = Modifier
+                    .padding(top = 10.dp, bottom = 4.dp)
+                    .size(width = 38.dp, height = 4.dp)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(Color.White.copy(alpha = 0.32f))
+            )
+        }
+    ) {
+        Column(Modifier.fillMaxWidth().fillMaxHeight(0.78f)) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(Icons.Rounded.Forum, contentDescription = null, tint = Color.White, modifier = Modifier.size(22.dp))
+                Column(Modifier.weight(1f).padding(start = 12.dp)) {
+                    Text("Comments", color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.Bold)
+                    Text(
+                        text = listOfNotNull(track.title, page?.countText).joinToString(" · "),
+                        color = TextSecondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+            Box(Modifier.weight(1f).fillMaxWidth()) {
+                when {
+                    isLoading && page == null -> CircularProgressIndicator(
+                        modifier = Modifier.align(Alignment.Center), color = Color.White, strokeWidth = 2.dp
+                    )
+                    error != null && page == null -> Column(
+                        modifier = Modifier.align(Alignment.Center).padding(28.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(error, color = TextSecondary)
+                        TextButton(onClick = onRetry) { Text("Retry", color = Color.White) }
+                    }
+                    page?.commentsDisabled == true || (page != null && page.comments.isEmpty()) -> Text(
+                        if (page?.commentsDisabled == true) "Comments are turned off for this video." else "No comments to show yet.",
+                        color = TextSecondary,
+                        modifier = Modifier.align(Alignment.Center)
+                    )
+                    page != null -> LazyColumn(Modifier.fillMaxWidth()) {
+                        items(page.comments, key = { it.id }) { comment ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 12.dp),
+                                verticalAlignment = Alignment.Top
+                            ) {
+                                if (!comment.avatarUrl.isNullOrBlank()) {
+                                    AsyncImage(
+                                        model = comment.avatarUrl, contentDescription = null,
+                                        contentScale = ContentScale.Crop,
+                                        modifier = Modifier.size(38.dp).clip(CircleShape)
+                                    )
+                                } else Box(Modifier.size(38.dp).clip(CircleShape).background(Color(0xFF353943)))
+                                Column(Modifier.weight(1f).padding(start = 12.dp)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(comment.author, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        if (comment.publishedTime.isNotBlank()) Text("  ·  ${comment.publishedTime}", color = TextSecondary, fontSize = 11.sp, maxLines = 1)
+                                    }
+                                    Spacer(Modifier.height(5.dp))
+                                    Text(comment.text, color = Color.White.copy(alpha = 0.90f), fontSize = 13.sp, lineHeight = 19.sp)
+                                    if (comment.likeCount.isNotBlank() && comment.likeCount != "0") {
+                                        Spacer(Modifier.height(5.dp))
+                                        Text("♡  ${comment.likeCount}", color = TextSecondary, fontSize = 11.sp)
+                                    }
+                                }
+                            }
+                        }
+                        if (page.continuation != null) item {
+                            TextButton(onClick = onLoadMore, modifier = Modifier.fillMaxWidth()) {
+                                if (isLoading) CircularProgressIndicator(Modifier.size(16.dp), color = Color.White, strokeWidth = 2.dp)
+                                else Text("Load more comments", color = Color.White)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

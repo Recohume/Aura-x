@@ -9,7 +9,9 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.Animatable
@@ -22,8 +24,12 @@ import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkHorizontally
+import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.input.pointer.pointerInput
@@ -64,6 +70,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
@@ -99,6 +106,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import com.auramusic.app.ui.components.AudioPlayingIndicator
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -194,6 +202,12 @@ fun AuraMainScreen(viewModel: AuraViewModel) {
     val homeMusicVideos by viewModel.homeMusicVideos.collectAsState()
     val selectedArtistDetail by viewModel.selectedArtistDetail.collectAsState()
     val isArtistLoading by viewModel.isArtistLoading.collectAsState()
+    val nowPlayingArtistDetail by viewModel.nowPlayingArtistDetail.collectAsState()
+    val nowPlayingVideoInfo by viewModel.nowPlayingVideoInfo.collectAsState()
+    val isNowPlayingArtistLoading by viewModel.isNowPlayingArtistLoading.collectAsState()
+    val playerComments by viewModel.playerComments.collectAsState()
+    val areCommentsLoading by viewModel.areCommentsLoading.collectAsState()
+    val commentsError by viewModel.commentsError.collectAsState()
     val selectedPlaylistDetail by viewModel.selectedPlaylistDetail.collectAsState()
 
     BackHandler(enabled = !isPlayerExpanded && selectedArtistDetail != null) {
@@ -209,6 +223,7 @@ fun AuraMainScreen(viewModel: AuraViewModel) {
     }
     val isPlaylistLoading by viewModel.isPlaylistLoading.collectAsState()
     val activeCategory by viewModel.activeCategory.collectAsState()
+    val homeCategoryBackground by viewModel.homeCategoryBackground.collectAsState()
     val categoryTracks by viewModel.categoryTracks.collectAsState()
     val homeRecommendations by viewModel.homeRecommendations.collectAsState()
     val homeAlbumRecommendations by viewModel.homeAlbumRecommendations.collectAsState()
@@ -225,6 +240,7 @@ fun AuraMainScreen(viewModel: AuraViewModel) {
     val searchMatchedArtists by viewModel.searchMatchedArtists.collectAsState()
     val artistFeaturingItems by viewModel.artistFeaturingItems.collectAsState()
     val searchPlaylistResults by viewModel.searchPlaylistResults.collectAsState()
+    val searchExploreCoverTracks by viewModel.searchExploreCoverTracks.collectAsState()
     val spotifyImportStatus by viewModel.spotifyImportStatus.collectAsState()
     val importedPlaylistSuccess by viewModel.importedPlaylistSuccess.collectAsState()
     val selectedUserPlaylist by viewModel.selectedUserPlaylist.collectAsState()
@@ -233,8 +249,15 @@ fun AuraMainScreen(viewModel: AuraViewModel) {
     val downloads by viewModel.downloads.collectAsState()
     val playlists by viewModel.playlists.collectAsState()
     val recentlyPlayed by viewModel.recentlyPlayed.collectAsState()
+    val visibleTopArtists by viewModel.visibleTopArtists.collectAsState()
+    val visibleRecentlyPlayed by viewModel.visibleRecentlyPlayed.collectAsState()
+    val visibleUserPlaylists by viewModel.visibleUserPlaylists.collectAsState()
     val listeningStats by viewModel.listeningStats.collectAsState()
     val downloadingIds by viewModel.downloadingIds.collectAsState()
+
+    LaunchedEffect(selectedTab) {
+        if (selectedTab == 1) viewModel.loadSearchExploreCoverTracks()
+    }
 
     val currentTrack by AuraPlayerManager.currentTrack.collectAsState()
     val isPlaying by AuraPlayerManager.isPlaying.collectAsState()
@@ -311,129 +334,174 @@ fun AuraMainScreen(viewModel: AuraViewModel) {
             .fillMaxSize()
             .background(SpotifyPitchBlack)
     ) {
-        // 1. Screens Content (full screen underneath floating controls)
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .statusBarsPadding()
-        ) {
-            when (selectedTab) {
-                0 -> HomeScreen(
-                    chartSections = chartSections,
-                    moodCategories = moodCategories,
-                    isLoading = isLoadingHome,
-                    palette = palette,
-                    favorites = favorites,
-                    downloads = downloads,
-                    downloadingIds = downloadingIds,
-                    downloadProgressMap = downloadProgress,
-                    currentPlayingId = currentTrack?.videoId,
-                    isPlaying = isPlaying,
-                    recentlyPlayed = recentlyPlayed,
-                    homeRecommendations = homeRecommendations,
-                    albumRecommendations = homeAlbumRecommendations,
-                    likedRecommendations = homeLikedRecommendations,
-                    userPlaylists = playlists,
-                    topArtists = topArtists,
-                    communityPlaylists = communityPlaylists,
-                    musicVideos = homeMusicVideos,
-                    activeCategory = activeCategory,
-                    categoryTracks = categoryTracks,
-                    isCategoryLoading = isCategoryLoading,
-                    onPlayTrack = { track, queue -> viewModel.playTrack(track, queue) },
-                    onPlayMusicVideo = { track, queue -> viewModel.playHomeMusicVideo(track, queue) },
-                    onPlayArtist = { artist -> viewModel.playArtist(artist) },
-                    onOpenArtist = { artist -> viewModel.openArtistDetail(artist) },
-                    onPlayCommunityPlaylist = { playlist -> viewModel.playCommunityPlaylist(playlist) },
-                    onOpenPlaylist = { playlist -> viewModel.openPlaylistDetail(playlist) },
-                    onOpenUserPlaylist = { pl ->
-                        openedPlaylistFromHome = true
-                        selectedTab = 2
-                        viewModel.selectUserPlaylist(pl)
-                    },
-                    onSelectCategory = { category -> viewModel.selectCategory(category) },
-                    onPlayMood = { mood -> viewModel.playMoodCategory(mood) },
-                    onToggleFavorite = { track -> viewModel.toggleFavorite(track) },
-                    onDownloadTrack = { track -> requestDownloadWithPermission { viewModel.downloadTrack(track) } },
-                    onRefresh = { viewModel.refreshHome() },
-                    onOpenArtistByName = { artistName, songTitle -> viewModel.openArtistByName(artistName, songTitle) },
-                    onAddTrackToPlaylist = { plId, track -> viewModel.addTrackToPlaylist(plId, track) },
-                    onCreatePlaylist = { name, desc, cover -> viewModel.createPlaylist(name, desc, cover) }
-                )
-                1 -> SearchScreen(
-                    query = searchQuery,
-                    filter = searchFilter,
-                    results = searchResults,
-                    isSearching = isSearching,
-                    favorites = favorites,
-                    downloads = downloads,
-                    downloadingIds = downloadingIds,
-                    recentlyPlayed = recentlyPlayed,
-                    matchedArtist = searchMatchedArtist,
-                    matchedArtists = searchMatchedArtists,
-                    artistFeaturingItems = artistFeaturingItems,
-                    playlistResults = searchPlaylistResults,
-                    currentPlayingId = currentTrack?.videoId,
-                    onQueryChange = { viewModel.updateSearchQuery(it) },
-                    onFilterChange = { viewModel.setSearchFilter(it) },
-                    onPlayTrack = { track, queue -> viewModel.playTrack(track, queue) },
-                    onPlaySearchTrack = { track, results -> viewModel.playSearchTrack(track, results) },
-                    onToggleFavorite = { viewModel.toggleFavorite(it) },
-                    onDownloadTrack = { track -> requestDownloadWithPermission { viewModel.downloadTrack(track) } },
-                    playlists = playlists,
-                    onAddTrackToPlaylist = { plId, track -> viewModel.addTrackToPlaylist(plId, track) },
-                    onCreatePlaylist = { name, desc, cover -> viewModel.createPlaylist(name, desc, cover) },
-                    onRemoveRecentlyPlayed = { viewModel.removeFromRecentlyPlayed(it) },
-                    onOpenArtist = { artistName, songTitle -> viewModel.openArtistByName(artistName, songTitle) },
-                    onOpenCommunityPlaylist = { viewModel.openPlaylistDetail(it) },
-                    onPlayCommunityPlaylist = { viewModel.playCommunityPlaylist(it) },
-                    onToggleSaveCommunityPlaylist = { viewModel.toggleSaveCommunityPlaylist(it) }
-                )
-                2 -> LibraryScreen(
-                    favorites = favorites,
-                    downloads = downloads,
-                    playlists = playlists,
-                    stats = listeningStats,
-                    downloadingIds = downloadingIds,
-                    downloadProgressMap = downloadProgress,
-                    currentPlayingId = currentTrack?.videoId,
-                    isPlaying = isPlaying,
-                    spotifyImportStatus = spotifyImportStatus,
-                    importedPlaylistSuccess = importedPlaylistSuccess,
-                    initialPlaylistId = selectedUserPlaylist?.id,
-                    openedFromHomeScreen = openedPlaylistFromHome,
-                    onNavigateToHome = {
-                        openedPlaylistFromHome = false
-                        viewModel.clearSelectedUserPlaylist()
-                        selectedTab = 0
-                    },
-                    onClearInitialPlaylist = { viewModel.clearSelectedUserPlaylist() },
-                    onImportSpotifyPlaylist = { viewModel.importSpotifyPlaylist(it) },
-                    onDismissImportSuccess = { viewModel.dismissImportSuccessModal() },
-                    onPlayTrack = { track, queue -> viewModel.playTrack(track, queue) },
-                    onToggleFavorite = { viewModel.toggleFavorite(it) },
-                    onDownloadTrack = { track -> requestDownloadWithPermission { viewModel.downloadTrack(track) } },
-                    onRemoveDownload = { track -> viewModel.removeDownload(track) },
-                    onUpdatePlaylistCover = { id, cover -> viewModel.updatePlaylistCover(id, cover) },
-                    onUpdatePlaylistTitle = { id, title -> viewModel.updatePlaylistTitle(id, title) },
-                    onDeletePlaylist = { id -> viewModel.deletePlaylist(id) },
-                    onRemoveTrackFromPlaylist = { plId, vId -> viewModel.removeTrackFromPlaylist(plId, vId) },
-                    onCreatePlaylist = { name, desc, cover -> viewModel.createPlaylist(name, desc, cover) },
-                    onAddTrackToPlaylist = { plId, track -> viewModel.addTrackToPlaylist(plId, track) },
-                    onOpenArtist = { artistName -> viewModel.openArtistByName(artistName) }
-                )
-                3 -> SettingsScreen(viewModel = viewModel)
+        // 1. Screens Content (full screen underneath floating controls) with directional slide transitions
+        val saveableStateHolder = rememberSaveableStateHolder()
+        val navSlideEasing = remember { CubicBezierEasing(0.23f, 1f, 0.32f, 1f) }
+        AnimatedContent(
+            targetState = selectedTab,
+            transitionSpec = {
+                val direction = if (targetState > initialState) 1 else -1
+                (slideInHorizontally(
+                    animationSpec = tween(durationMillis = 260, easing = navSlideEasing),
+                    initialOffsetX = { fullWidth -> (fullWidth * 0.24f * direction).toInt() }
+                ) + fadeIn(
+                    animationSpec = tween(durationMillis = 220, easing = navSlideEasing)
+                )).togetherWith(
+                    slideOutHorizontally(
+                        animationSpec = tween(durationMillis = 240, easing = navSlideEasing),
+                        targetOffsetX = { fullWidth -> (-fullWidth * 0.24f * direction).toInt() }
+                    ) + fadeOut(
+                        animationSpec = tween(durationMillis = 170, easing = navSlideEasing)
+                    )
+                ).using(SizeTransform(clip = false))
+            },
+            label = "MainNavigationSlideTransition",
+            modifier = Modifier.fillMaxSize()
+        ) { tab ->
+            saveableStateHolder.SaveableStateProvider(key = tab) {
+                when (tab) {
+                    0 -> HomeScreen(
+                        chartSections = chartSections,
+                        moodCategories = moodCategories,
+                        isLoading = isLoadingHome,
+                        palette = palette,
+                        favorites = favorites,
+                        downloads = downloads,
+                        downloadingIds = downloadingIds,
+                        downloadProgressMap = downloadProgress,
+                        currentPlayingId = currentTrack?.videoId,
+                        isPlaying = isPlaying,
+                        recentlyPlayed = visibleRecentlyPlayed,
+                        homeRecommendations = homeRecommendations,
+                        albumRecommendations = homeAlbumRecommendations,
+                        likedRecommendations = homeLikedRecommendations,
+                        userPlaylists = visibleUserPlaylists,
+                        topArtists = visibleTopArtists,
+                        communityPlaylists = communityPlaylists,
+                        musicVideos = homeMusicVideos,
+                        activeCategory = activeCategory,
+                        homeCategoryBackground = homeCategoryBackground,
+                        categoryTracks = categoryTracks,
+                        isCategoryLoading = isCategoryLoading,
+                        onPlayTrack = { track, queue -> viewModel.playTrack(track, queue) },
+                        onPlayMusicVideo = { track, queue -> viewModel.playHomeMusicVideo(track, queue) },
+                        onPlayArtist = { artist -> viewModel.playArtist(artist) },
+                        onOpenArtist = { artist -> viewModel.openArtistDetail(artist) },
+                        onPlayCommunityPlaylist = { playlist -> viewModel.playCommunityPlaylist(playlist) },
+                        onOpenPlaylist = { playlist -> viewModel.openPlaylistDetail(playlist) },
+                        onOpenUserPlaylist = { pl ->
+                            openedPlaylistFromHome = true
+                            selectedTab = 2
+                            viewModel.selectUserPlaylist(pl)
+                        },
+                        onSelectCategory = { category -> viewModel.selectCategory(category) },
+                        onPlayMood = { mood -> viewModel.playMoodCategory(mood) },
+                        onToggleFavorite = { track -> viewModel.toggleFavorite(track) },
+                        onDownloadTrack = { track -> requestDownloadWithPermission { viewModel.downloadTrack(track) } },
+                        onRefresh = { viewModel.refreshHome() },
+                        onOpenArtistByName = { artistName, songTitle -> viewModel.openArtistByName(artistName, songTitle) },
+                        onAddTrackToPlaylist = { plId, track -> viewModel.addTrackToPlaylist(plId, track) },
+                        onCreatePlaylist = { name, desc, cover -> viewModel.createPlaylist(name, desc, cover) }
+                    )
+                    1 -> Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .statusBarsPadding()
+                    ) {
+                        SearchScreen(
+                            query = searchQuery,
+                            filter = searchFilter,
+                            results = searchResults,
+                            isSearching = isSearching,
+                            favorites = favorites,
+                            downloads = downloads,
+                            downloadingIds = downloadingIds,
+                            recentlyPlayed = recentlyPlayed,
+                            matchedArtist = searchMatchedArtist,
+                            matchedArtists = searchMatchedArtists,
+                            artistFeaturingItems = artistFeaturingItems,
+                            playlistResults = searchPlaylistResults,
+                            exploreArtworkTracks = searchExploreCoverTracks,
+                            currentPlayingId = currentTrack?.videoId,
+                            isPlaying = isPlaying,
+                            onQueryChange = { viewModel.updateSearchQuery(it) },
+                            onFilterChange = { viewModel.setSearchFilter(it) },
+                            onPlayTrack = { track, queue -> viewModel.playTrack(track, queue) },
+                            onPlaySearchTrack = { track, results -> viewModel.playSearchTrack(track, results) },
+                            onToggleFavorite = { viewModel.toggleFavorite(it) },
+                            onDownloadTrack = { track -> requestDownloadWithPermission { viewModel.downloadTrack(track) } },
+                            playlists = playlists,
+                            onAddTrackToPlaylist = { plId, track -> viewModel.addTrackToPlaylist(plId, track) },
+                            onCreatePlaylist = { name, desc, cover -> viewModel.createPlaylist(name, desc, cover) },
+                            onRemoveRecentlyPlayed = { viewModel.removeFromRecentlyPlayed(it) },
+                            onOpenArtist = { artistName, songTitle -> viewModel.openArtistByName(artistName, songTitle) },
+                            onOpenCommunityPlaylist = { viewModel.openPlaylistDetail(it) },
+                            onPlayCommunityPlaylist = { viewModel.playCommunityPlaylist(it) },
+                            onToggleSaveCommunityPlaylist = { viewModel.toggleSaveCommunityPlaylist(it) }
+                        )
+                    }
+                    2 -> Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .statusBarsPadding()
+                    ) {
+                        LibraryScreen(
+                            favorites = favorites,
+                            downloads = downloads,
+                            playlists = playlists,
+                            stats = listeningStats,
+                            recentlyPlayed = recentlyPlayed,
+                            downloadingIds = downloadingIds,
+                            downloadProgressMap = downloadProgress,
+                            currentPlayingId = currentTrack?.videoId,
+                            isPlaying = isPlaying,
+                            spotifyImportStatus = spotifyImportStatus,
+                            importedPlaylistSuccess = importedPlaylistSuccess,
+                            initialPlaylistId = selectedUserPlaylist?.id,
+                            openedFromHomeScreen = openedPlaylistFromHome,
+                            onNavigateToHome = {
+                                openedPlaylistFromHome = false
+                                viewModel.clearSelectedUserPlaylist()
+                                selectedTab = 0
+                            },
+                            onClearInitialPlaylist = { viewModel.clearSelectedUserPlaylist() },
+                            onImportSpotifyPlaylist = { viewModel.importSpotifyPlaylist(it) },
+                            onDismissImportSuccess = { viewModel.dismissImportSuccessModal() },
+                            onPlayTrack = { track, queue -> viewModel.playTrack(track, queue) },
+                            onToggleFavorite = { viewModel.toggleFavorite(it) },
+                            onDownloadTrack = { track -> requestDownloadWithPermission { viewModel.downloadTrack(track) } },
+                            onRemoveDownload = { track -> viewModel.removeDownload(track) },
+                            onUpdatePlaylistCover = { id, cover -> viewModel.updatePlaylistCover(id, cover) },
+                            onUpdatePlaylistTitle = { id, title -> viewModel.updatePlaylistTitle(id, title) },
+                            onDeletePlaylist = { id -> viewModel.deletePlaylist(id) },
+                            onRemoveTrackFromPlaylist = { plId, vId -> viewModel.removeTrackFromPlaylist(plId, vId) },
+                            onCreatePlaylist = { name, desc, cover -> viewModel.createPlaylist(name, desc, cover) },
+                            onAddTrackToPlaylist = { plId, track -> viewModel.addTrackToPlaylist(plId, track) },
+                            onOpenArtist = { artistName -> viewModel.openArtistByName(artistName) }
+                        )
+                    }
+                    3 -> Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .statusBarsPadding()
+                    ) {
+                        SettingsScreen(viewModel = viewModel)
+                    }
+                }
             }
         }
 
         // 1b. Full-Screen Slide-in Artist Detail Screen
         AnimatedVisibility(
             visible = selectedArtistDetail != null,
-            enter = fadeIn(animationSpec = tween(200)),
-            exit = slideOutVertically(
-                targetOffsetY = { it },
-                animationSpec = tween(durationMillis = 280, easing = CubicBezierEasing(0.23f, 1f, 0.32f, 1f))
-            ) + fadeOut(animationSpec = tween(180)),
+            enter = slideInHorizontally(
+                initialOffsetX = { it },
+                animationSpec = tween(durationMillis = 280, easing = navSlideEasing)
+            ) + fadeIn(animationSpec = tween(200, easing = navSlideEasing)),
+            exit = slideOutHorizontally(
+                targetOffsetX = { it },
+                animationSpec = tween(durationMillis = 250, easing = navSlideEasing)
+            ) + fadeOut(animationSpec = tween(180, easing = navSlideEasing)),
             modifier = Modifier.fillMaxSize()
         ) {
             selectedArtistDetail?.let { detail ->
@@ -462,8 +530,14 @@ fun AuraMainScreen(viewModel: AuraViewModel) {
         // 1c. Full-Screen Slide-in Playlist Detail Screen
         AnimatedVisibility(
             visible = selectedPlaylistDetail != null,
-            enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
-            exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
+            enter = slideInHorizontally(
+                initialOffsetX = { it },
+                animationSpec = tween(durationMillis = 280, easing = navSlideEasing)
+            ) + fadeIn(animationSpec = tween(200, easing = navSlideEasing)),
+            exit = slideOutHorizontally(
+                targetOffsetX = { it },
+                animationSpec = tween(durationMillis = 250, easing = navSlideEasing)
+            ) + fadeOut(animationSpec = tween(180, easing = navSlideEasing)),
             modifier = Modifier.fillMaxSize()
         ) {
             selectedPlaylistDetail?.let { detail ->
@@ -736,6 +810,12 @@ fun AuraMainScreen(viewModel: AuraViewModel) {
                     isVideoLoading = isVideoLoading,
                     livePerformances = livePerformances,
                     isLoadingLivePerformances = isLoadingLivePerformances,
+                    artistDetail = nowPlayingArtistDetail,
+                    videoInfo = nowPlayingVideoInfo,
+                    isArtistDetailLoading = isNowPlayingArtistLoading,
+                    onLoadArtistDetail = { artist, title, artwork ->
+                        viewModel.loadNowPlayingArtist(artist, title, artwork)
+                    },
                     onCollapse = collapseFullPlayer,
                     hideArtworkForPlayerTransition = (isPlayerCollapseTransition || isPlayerExpandTransition) && !isVideoMode,
                     playerCollapseProgress = if (isPlayerCollapseTransition || isPlayerExpandTransition) {
@@ -756,12 +836,9 @@ fun AuraMainScreen(viewModel: AuraViewModel) {
                     onLoadLivePerformances = { viewModel.loadLivePerformances() },
                     onPlayLivePerformance = { viewModel.playLivePerformance(it) },
                     onToggleStyle = {
-                        viewModel.setNowPlayingStyle(
-                            if (nowPlayingStyle == com.auramusic.app.domain.model.NowPlayingStyle.SPOTIFY)
-                                com.auramusic.app.domain.model.NowPlayingStyle.LIQUID_GLASS
-                            else
-                                com.auramusic.app.domain.model.NowPlayingStyle.SPOTIFY
-                        )
+                        val styles = com.auramusic.app.domain.model.NowPlayingStyle.entries
+                        val next = (styles.indexOf(nowPlayingStyle) + 1).mod(styles.size)
+                        viewModel.setNowPlayingStyle(styles[next])
                     },
                     onOpenArtist = { artistName ->
                         collapseFullPlayer()
@@ -776,7 +853,12 @@ fun AuraMainScreen(viewModel: AuraViewModel) {
                     onCreatePlaylist = { name, desc, cover -> viewModel.createPlaylist(name, desc, cover) },
                     onPlayQueueTrack = { viewModel.playTrack(it, queue) },
                     onAdjustLyricsOffset = { viewModel.adjustLyricsOffset(it) },
-                    onToggleRomanized = { viewModel.toggleRomanizedLyrics() }
+                    onToggleRomanized = { viewModel.toggleRomanizedLyrics() },
+                    comments = playerComments,
+                    isLoadingComments = areCommentsLoading,
+                    commentsError = commentsError,
+                    onLoadComments = { viewModel.loadPlayerComments(it) },
+                    onLoadMoreComments = { viewModel.loadMorePlayerComments() }
                 )
             }
         }
@@ -793,7 +875,7 @@ fun AuraMainScreen(viewModel: AuraViewModel) {
             val startWidth = artworkStart.width.coerceAtLeast(1f)
             val startHeight = artworkStart.height.coerceAtLeast(1f)
             val density = androidx.compose.ui.platform.LocalDensity.current
-            val sourceCorner = if (nowPlayingStyle == com.auramusic.app.domain.model.NowPlayingStyle.LIQUID_GLASS) 22f else 8f
+            val sourceCorner = if (nowPlayingStyle == com.auramusic.app.domain.model.NowPlayingStyle.SPOTIFY) 8f else 22f
             val corner = sourceCorner + (8f - sourceCorner) * progress
 
             AsyncImage(
@@ -907,16 +989,21 @@ private fun AuraMiniPlayer(
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 // 1. STATIONARY Artwork: Stays completely fixed, never overlapped by sliding text
-                AsyncImage(
-                    model = track.highResArtworkUrl,
-                    contentDescription = track.title,
-                    contentScale = ContentScale.Crop,
+                Box(
                     modifier = Modifier
                         .size(42.dp)
                         .clip(RoundedCornerShape(8.dp))
                         .onGloballyPositioned { onArtworkPositioned(it.boundsInRoot()) }
-                        .graphicsLayer { alpha = if (hideArtworkForTransition) 0f else 1f }
-                )
+                        .graphicsLayer { alpha = if (hideArtworkForTransition) 0f else 1f },
+                    contentAlignment = Alignment.Center
+                ) {
+                    AsyncImage(
+                        model = track.highResArtworkUrl,
+                        contentDescription = track.title,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
 
                 Spacer(modifier = Modifier.width(10.dp))
 
@@ -997,9 +1084,7 @@ private fun AuraMiniPlayer(
                         Text(
                             text = track.title,
                             color = Color.White,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 13.5.sp,
-                            lineHeight = 15.sp,
+                            style = MaterialTheme.typography.titleSmall,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
@@ -1007,8 +1092,7 @@ private fun AuraMiniPlayer(
                         Text(
                             text = track.artist,
                             color = Color.White.copy(alpha = 0.75f),
-                            fontSize = 11.5.sp,
-                            lineHeight = 13.sp,
+                            style = MaterialTheme.typography.bodySmall,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
@@ -1029,9 +1113,7 @@ private fun AuraMiniPlayer(
                             Text(
                                 text = displayPrev.title,
                                 color = Color.White,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 13.5.sp,
-                                lineHeight = 15.sp,
+                                style = MaterialTheme.typography.titleSmall,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
@@ -1039,8 +1121,7 @@ private fun AuraMiniPlayer(
                             Text(
                                 text = displayPrev.artist,
                                 color = Color.White.copy(alpha = 0.75f),
-                                fontSize = 11.5.sp,
-                                lineHeight = 13.sp,
+                                style = MaterialTheme.typography.bodySmall,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
@@ -1062,9 +1143,7 @@ private fun AuraMiniPlayer(
                             Text(
                                 text = displayNext.title,
                                 color = Color.White,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 13.5.sp,
-                                lineHeight = 15.sp,
+                                style = MaterialTheme.typography.titleSmall,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
@@ -1072,8 +1151,7 @@ private fun AuraMiniPlayer(
                             Text(
                                 text = displayNext.artist,
                                 color = Color.White.copy(alpha = 0.75f),
-                                fontSize = 11.5.sp,
-                                lineHeight = 13.sp,
+                                style = MaterialTheme.typography.bodySmall,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )

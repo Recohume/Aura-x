@@ -26,6 +26,7 @@ import androidx.compose.material.icons.rounded.Videocam
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -112,8 +113,7 @@ fun AuraTrackOptionsModal(
                     Text(
                         text = track.title,
                         color = Color.White,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 15.sp,
+                        style = MaterialTheme.typography.titleSmall,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
@@ -121,7 +121,7 @@ fun AuraTrackOptionsModal(
                     Text(
                         text = track.artist,
                         color = TextSecondary,
-                        fontSize = 12.5.sp,
+                        style = MaterialTheme.typography.bodySmall,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
@@ -134,21 +134,7 @@ fun AuraTrackOptionsModal(
                 modifier = Modifier.padding(bottom = 12.dp)
             )
 
-            // Option 1: Play Next
-            TrackOptionRow(
-                icon = Icons.AutoMirrored.Rounded.QueueMusic,
-                label = "Play Next",
-                onClick = onPlayNext
-            )
-
-            // Option 2: Add to Queue
-            TrackOptionRow(
-                icon = Icons.Rounded.PlaylistAdd,
-                label = "Add to Queue",
-                onClick = onAddToQueue
-            )
-
-            // Option 3: Liked Songs Toggle
+            // Keep the primary library actions together, like the SimpMusic track sheet.
             TrackOptionRow(
                 icon = if (isFavorite) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
                 label = if (isFavorite) "Remove from Liked Songs" else "Save to Liked Songs",
@@ -156,7 +142,6 @@ fun AuraTrackOptionsModal(
                 onClick = onToggleFavorite
             )
 
-            // Option 4: Add to Playlist
             TrackOptionRow(
                 icon = Icons.Rounded.PlaylistAdd,
                 label = "Add to Playlist",
@@ -164,7 +149,6 @@ fun AuraTrackOptionsModal(
                 onClick = onAddToPlaylist
             )
 
-            // Option 5: Download Song (Offline Access) or Remove from Downloads
             if (isDownloaded && onRemoveDownload != null) {
                 TrackOptionRow(
                     icon = Icons.Rounded.DeleteOutline,
@@ -187,7 +171,19 @@ fun AuraTrackOptionsModal(
                 )
             }
 
-            // Option 5b: Remove from Playlist (when viewing inside a playlist)
+            TrackOptionRow(
+                icon = Icons.AutoMirrored.Rounded.QueueMusic,
+                label = "Play Next",
+                onClick = onPlayNext
+            )
+
+            TrackOptionRow(
+                icon = Icons.Rounded.PlaylistAdd,
+                label = "Add to Queue",
+                onClick = onAddToQueue
+            )
+
+            // Remove from playlist is contextual, so keep it below the general queue actions.
             if (onRemoveFromPlaylist != null) {
                 TrackOptionRow(
                     icon = Icons.Rounded.DeleteOutline,
@@ -197,7 +193,6 @@ fun AuraTrackOptionsModal(
                 )
             }
 
-            // Option 6: Watch Music Video
             if (onWatchVideo != null) {
                 TrackOptionRow(
                     icon = Icons.Rounded.Videocam,
@@ -207,7 +202,6 @@ fun AuraTrackOptionsModal(
                 )
             }
 
-            // Option 7: Go to Artist (optional)
             if (onGoToArtist != null) {
                 TrackOptionRow(
                     icon = Icons.Rounded.Person,

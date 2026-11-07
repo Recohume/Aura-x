@@ -30,11 +30,14 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.source.MergingMediaSource
 import androidx.media3.exoplayer.source.ProgressiveMediaSource
 import com.auramusic.app.core.extractor.SimpMusicExtractorEngine
+import com.auramusic.app.data.AuraStorageRepository
 import com.auramusic.app.domain.model.AuraTrack
 import com.auramusic.app.domain.model.EqualizerPreset
 import com.auramusic.app.domain.model.PlaybackMode
+import com.auramusic.app.domain.model.SIMPMUSIC_ALL_EQ_PRESETS
 import com.auramusic.app.domain.model.SIMPMUSIC_EQ_PRESETS
 import com.auramusic.app.domain.model.SponsorSegment
+import com.auramusic.app.domain.model.findMatchingPreset
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -99,13 +102,34 @@ object AuraPlayerManager {
     val lastSkippedSegment: StateFlow<String?> = _lastSkippedSegment.asStateFlow()
 
     private val _activeEqPreset = MutableStateFlow(
-        SIMPMUSIC_EQ_PRESETS.find { it.id == "studio" } ?: SIMPMUSIC_EQ_PRESETS.first()
+        SIMPMUSIC_ALL_EQ_PRESETS.find { it.id == "flat" } ?: SIMPMUSIC_ALL_EQ_PRESETS.first()
     )
     val activeEqPreset: StateFlow<EqualizerPreset> = _activeEqPreset.asStateFlow()
+
+    private val _equalizerBands = MutableStateFlow(listOf(0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f))
+    val equalizerBands: StateFlow<List<Float>> = _equalizerBands.asStateFlow()
+
+    private val _equalizerPreamp = MutableStateFlow(0f)
+    val equalizerPreamp: StateFlow<Float> = _equalizerPreamp.asStateFlow()
+
+    private val _activeEqPresetName = MutableStateFlow("Flat")
+    val activeEqPresetName: StateFlow<String> = _activeEqPresetName.asStateFlow()
 
     // Default EQ to false for bit-perfect, uncolored, distortion-free audio
     private val _eqEnabled = MutableStateFlow(false)
     val eqEnabled: StateFlow<Boolean> = _eqEnabled.asStateFlow()
+
+    private val _audioQuality = MutableStateFlow("Auto")
+    val audioQuality: StateFlow<String> = _audioQuality.asStateFlow()
+
+    private val _videoQuality = MutableStateFlow("Auto (1080p)")
+    val videoQuality: StateFlow<String> = _videoQuality.asStateFlow()
+
+    private val _skipSilence = MutableStateFlow(false)
+    val skipSilence: StateFlow<Boolean> = _skipSilence.asStateFlow()
+
+    private val _maxCacheSizeMb = MutableStateFlow(1024)
+    val maxCacheSizeMb: StateFlow<Int> = _maxCacheSizeMb.asStateFlow()
 
     private val _loudnessNormalization = MutableStateFlow(true)
     val loudnessNormalization: StateFlow<Boolean> = _loudnessNormalization.asStateFlow()
@@ -150,6 +174,21 @@ object AuraPlayerManager {
         if (exoPlayer != null) return
         val ctx = context.applicationContext
         appContext = ctx
+
+        val storage = AuraStorageRepository(ctx)
+        _equalizerBands.value = storage.loadEqualizerBands()
+        _equalizerPreamp.value = storage.loadEqualizerPreamp()
+        val savedPreset = storage.loadEqualizerPreset()
+        _activeEqPresetName.value = savedPreset
+        _activeEqPreset.value = SIMPMUSIC_ALL_EQ_PRESETS.firstOrNull { it.name == savedPreset }
+            ?: SIMPMUSIC_ALL_EQ_PRESETS.first()
+        _audioQuality.value = storage.loadAudioQuality()
+        _videoQuality.value = storage.loadVideoQuality()
+        _loudnessNormalization.value = storage.loadNormalizeVolume()
+        _skipSilence.value = storage.loadSkipSilence()
+        _crossfadeSeconds.value = storage.loadCrossfadeDuration()
+        _maxCacheSizeMb.value = storage.loadMaxCacheSize()
+
         SimpMusicExtractorEngine.initExtractors()
 
         // 1. SimpMusic SimpleCache (512 MB disk cache for 0ms replays & instant scrubbing)
@@ -260,6 +299,7 @@ object AuraPlayerManager {
             .setHandleAudioBecomingNoisy(true)
             .setWakeMode(C.WAKE_MODE_NETWORK)
             .build()
+        player.skipSilenceEnabled = _skipSilence.value
 
         player.addListener(object : Player.Listener {
             override fun onIsPlayingChanged(isPlaying: Boolean) {
@@ -728,9 +768,49 @@ object AuraPlayerManager {
         _sponsorBlockEnabled.value = enabled
     }
 
-    fun selectEqualizerPreset(preset: EqualizerPreset) {
-        _activeEqPreset.value = preset
+    fun setEqualizerBands(bands: List<Float>) {
+        _equalizerBands.value = bands
+        val match = findMatchingPreset(bands)
+        _activeEqPresetName.value = match?.name ?: "Custom"
+        if (match != null) {
+            _activeEqPreset.value = match
+        }
         applyEqualizerCurve()
+        appContext?.let {
+            val storage = AuraStorageRepository(it)
+            storage.saveEqualizerBands(bands)
+            storage.saveEqualizerPreset(_activeEqPresetName.value)
+        }
+    }
+
+    fun setEqualizerPreamp(preampDb: Float) {
+        _equalizerPreamp.value = preampDb
+        applyEqualizerCurve()
+        appContext?.let { AuraStorageRepository(it).saveEqualizerPreamp(preampDb) }
+    }
+
+    fun applyEqualizerPreset(preset: EqualizerPreset) {
+        _activeEqPreset.value = preset
+        _activeEqPresetName.value = preset.name
+        _equalizerBands.value = preset.bandsDb
+        _equalizerPreamp.value = preset.preampDb
+        applyEqualizerCurve()
+        appContext?.let {
+            val storage = AuraStorageRepository(it)
+            storage.saveEqualizerBands(preset.bandsDb)
+            storage.saveEqualizerPreamp(preset.preampDb)
+            storage.saveEqualizerPreset(preset.name)
+        }
+    }
+
+    fun resetEqualizer() {
+        val flat = SIMPMUSIC_ALL_EQ_PRESETS.firstOrNull { it.id == "flat" }
+            ?: EqualizerPreset("flat", "Flat", "Flat response", listOf(0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f))
+        applyEqualizerPreset(flat)
+    }
+
+    fun selectEqualizerPreset(preset: EqualizerPreset) {
+        applyEqualizerPreset(preset)
     }
 
     fun setEqualizerEnabled(enabled: Boolean) {
@@ -741,10 +821,33 @@ object AuraPlayerManager {
     fun setLoudnessNormalization(enabled: Boolean) {
         _loudnessNormalization.value = enabled
         applyEqualizerCurve()
+        appContext?.let { AuraStorageRepository(it).saveNormalizeVolume(enabled) }
+    }
+
+    fun setAudioQuality(quality: String) {
+        _audioQuality.value = quality
+        appContext?.let { AuraStorageRepository(it).saveAudioQuality(quality) }
+    }
+
+    fun setVideoQuality(quality: String) {
+        _videoQuality.value = quality
+        appContext?.let { AuraStorageRepository(it).saveVideoQuality(quality) }
+    }
+
+    fun setSkipSilence(enabled: Boolean) {
+        _skipSilence.value = enabled
+        exoPlayer?.skipSilenceEnabled = enabled
+        appContext?.let { AuraStorageRepository(it).saveSkipSilence(enabled) }
+    }
+
+    fun setMaxCacheSizeMb(sizeMb: Int) {
+        _maxCacheSizeMb.value = sizeMb
+        appContext?.let { AuraStorageRepository(it).saveMaxCacheSize(sizeMb) }
     }
 
     fun setCrossfadeSeconds(seconds: Int) {
         _crossfadeSeconds.value = seconds.coerceIn(0, 12)
+        appContext?.let { AuraStorageRepository(it).saveCrossfadeDuration(seconds) }
     }
 
     fun setSleepTimerMinutes(minutes: Int?) {
@@ -1102,8 +1205,9 @@ object AuraPlayerManager {
 
     private fun applyEqualizerCurve() {
         val player = exoPlayer ?: return
-        val preset = _activeEqPreset.value
         val enabled = _eqEnabled.value
+        val bands = _equalizerBands.value
+        val preampDb = _equalizerPreamp.value
 
         try {
             val eq = hardwareEq
@@ -1115,10 +1219,10 @@ object AuraPlayerManager {
                 val maxMb = range[1].toInt()
 
                 for (b in 0 until numBands) {
-                    val mappedIdx = ((b.toFloat() / numBands.coerceAtLeast(1)) * preset.bandsDb.size)
+                    val mappedIdx = ((b.toFloat() / numBands.coerceAtLeast(1)) * bands.size)
                         .toInt()
-                        .coerceIn(0, preset.bandsDb.lastIndex)
-                    val targetMb = if (enabled) (preset.bandsDb[mappedIdx] * 100f).toInt() else 0
+                        .coerceIn(0, bands.lastIndex)
+                    val targetMb = if (enabled) (bands[mappedIdx] * 100f).toInt() else 0
                     eq.setBandLevel(b.toShort(), targetMb.coerceIn(minMb, maxMb).toShort())
                 }
             }
@@ -1128,10 +1232,11 @@ object AuraPlayerManager {
 
         // Anti-Clipping Headroom: calculate max band boost and apply negative headroom
         // so boosted low/high frequencies never clip against 0 dBFS ceiling
-        val maxBoost = if (enabled) preset.bandsDb.maxOrNull()?.coerceAtLeast(0f) ?: 0f else 0f
+        val maxBoost = if (enabled) bands.maxOrNull()?.coerceAtLeast(0f) ?: 0f else 0f
         val safeHeadroom = if (maxBoost > 0f) Math.pow(10.0, -maxBoost.toDouble() / 20.0).toFloat() else 1.0f
-        val gain = if (enabled) (preset.preampGain * safeHeadroom) else 1.0f
-        baseVolume = gain.coerceIn(0.2f, 1.0f)
+        val preampFactor = if (enabled) Math.pow(10.0, preampDb.toDouble() / 20.0).toFloat() else 1.0f
+        val gain = if (enabled) (preampFactor * safeHeadroom) else 1.0f
+        baseVolume = gain.coerceIn(0.15f, 1.0f)
         if (fadeJob?.isActive != true) {
             player.volume = baseVolume
         }

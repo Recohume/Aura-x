@@ -13,6 +13,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -26,6 +27,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -76,8 +78,15 @@ import com.auramusic.app.ui.components.AuraPlaylistOptionsModal
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
@@ -87,6 +96,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.window.Dialog
 import coil.compose.AsyncImage
 import com.auramusic.app.core.media.AuraPlayerManager
@@ -110,6 +120,7 @@ fun LibraryScreen(
     downloads: List<AuraTrack>,
     playlists: List<AuraPlaylist>,
     stats: ListeningStats,
+    recentlyPlayed: List<AuraTrack> = emptyList(),
     downloadingIds: Set<String>,
     downloadProgressMap: Map<String, Float> = emptyMap(),
     currentPlayingId: String? = null,
@@ -476,12 +487,46 @@ fun LibraryScreen(
 
         when (activeTab) {
             0 -> {
-                val allTracks = (favorites + downloads).distinctBy { it.videoId }
-                if (allTracks.isEmpty()) {
-                    EmptyVaultMessage("Your music vault is empty. Favorite or download tracks to see them here.")
-                } else {
-                    LazyColumn(contentPadding = PaddingValues(bottom = 140.dp)) {
-                        items(allTracks, key = { it.videoId }) { track ->
+                LazyColumn(contentPadding = PaddingValues(bottom = 140.dp)) {
+                        item(key = "library_overview") {
+                            Column(modifier = Modifier.padding(horizontal = 16.dp)) {
+                                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    LibraryOverviewTile(
+                                        title = "Liked songs", subtitle = "${favorites.size} songs",
+                                        tracks = favorites.take(3), modifier = Modifier.weight(1f).height(150.dp),
+                                        onClick = { activeTab = 2 }
+                                    )
+                                    val mostPlayed = stats.topTracks.firstOrNull()
+                                    LibraryOverviewTile(
+                                        title = "Most played",
+                                        subtitle = mostPlayed?.let { "${it.first.title} · ${it.second} plays" } ?: "No plays yet",
+                                        tracks = stats.topTracks.map { it.first },
+                                        modifier = Modifier.weight(1f).height(150.dp), onClick = { activeTab = 0 }
+                                    )
+                                }
+                                Spacer(Modifier.height(10.dp))
+                                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    LibraryOverviewTile(
+                                        title = "Downloaded", subtitle = "${downloads.size} songs",
+                                        tracks = downloads.take(3), modifier = Modifier.weight(1f).height(124.dp),
+                                        onClick = { activeTab = 3 }
+                                    )
+                                    LibraryOverviewTile(
+                                        title = "Playlists", subtitle = "${playlists.size} playlists",
+                                        tracks = playlists.mapNotNull { it.tracks.firstOrNull() }.take(3),
+                                        modifier = Modifier.weight(1f).height(124.dp), onClick = { activeTab = 1 }
+                                    )
+                                }
+                                Spacer(Modifier.height(18.dp))
+                                Text("Recently added", color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.Bold)
+                                Spacer(Modifier.height(6.dp))
+                            }
+                        }
+                        if (recentlyPlayed.isEmpty()) {
+                            item(key = "empty_tracks") {
+                                EmptyVaultMessage("No recently played songs yet. Play tracks to see them here.")
+                            }
+                        } else items(recentlyPlayed, key = { "recent_${it.videoId}" }) { track ->
                             val isFav = favorites.any { it.videoId == track.videoId }
                             val isDown = downloads.any { it.videoId == track.videoId && it.isDownloaded }
                             val isDownProgress = downloadingIds.contains(track.videoId)
@@ -492,13 +537,13 @@ fun LibraryScreen(
                                 isDownloaded = isDown,
                                 isDownloading = isDownProgress,
                                 downloadProgress = downloadProgressMap[track.videoId],
-                                onClick = { onPlayTrack(track, allTracks) },
+                                isPlaying = isPlaying,
+                                onClick = { onPlayTrack(track, recentlyPlayed) },
                                 onToggleFavorite = { onToggleFavorite(track) },
                                 onDownload = { onDownloadTrack(track) },
                                 onOptionsClick = { selectedModalTrack = track }
                             )
                         }
-                    }
                 }
             }
             1 -> {
@@ -529,6 +574,7 @@ fun LibraryScreen(
                                 isDownloaded = downloads.any { it.videoId == track.videoId && it.isDownloaded },
                                 isDownloading = downloadingIds.contains(track.videoId),
                                 downloadProgress = downloadProgressMap[track.videoId],
+                                isPlaying = isPlaying,
                                 onClick = { onPlayTrack(track, favorites) },
                                 onToggleFavorite = { onToggleFavorite(track) },
                                 onDownload = { onDownloadTrack(track) },
@@ -553,6 +599,7 @@ fun LibraryScreen(
                                 isDownloaded = isDown,
                                 isDownloading = isDownProgress,
                                 downloadProgress = downloadProgressMap[track.videoId],
+                                isPlaying = isPlaying,
                                 onClick = { onPlayTrack(track, downloads) },
                                 onToggleFavorite = { onToggleFavorite(track) },
                                 onDownload = { onDownloadTrack(track) },
@@ -735,6 +782,94 @@ fun LibraryScreen(
     }
 }
 
+@Composable
+private fun LibraryOverviewTile(
+    title: String,
+    subtitle: String,
+    tracks: List<AuraTrack>,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(20.dp))
+            .background(Color(0xFF24272D))
+            .clickable(onClick = onClick)
+            .padding(14.dp)
+    ) {
+        if (tracks.isEmpty()) {
+            EmptyArtworkFanStack(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(top = 2.dp, end = 2.dp)
+            )
+        } else if (tracks.size == 1) {
+            AsyncImage(
+                model = tracks.first().highResArtworkUrl,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(top = 2.dp, end = 2.dp)
+                    .size(54.dp)
+                    .clip(RoundedCornerShape(9.dp))
+            )
+        } else {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(top = 2.dp, end = 2.dp)
+                    .size(width = 82.dp, height = 60.dp)
+            ) {
+                tracks.take(3).forEachIndexed { index, track ->
+                    AsyncImage(
+                        model = track.highResArtworkUrl,
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .align(Alignment.Center)
+                            .offset(x = ((index - 1) * 20).dp)
+                            .rotate((index - 1) * 18f)
+                            .zIndex(index.toFloat())
+                            .size(width = 44.dp, height = 52.dp)
+                            .clip(RoundedCornerShape(9.dp))
+                    )
+                }
+            }
+        }
+        Column(modifier = Modifier.align(Alignment.BottomStart)) {
+            Text(title, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+            Text(subtitle, color = TextSecondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+    }
+}
+
+@Composable
+private fun EmptyArtworkFanStack(modifier: Modifier = Modifier) {
+    Canvas(modifier = modifier.size(width = 82.dp, height = 60.dp)) {
+        val cardWidth = size.width * 0.54f
+        val cardHeight = size.height * 0.86f
+        val corner = CornerRadius(7.dp.toPx())
+        val dashedStroke = Stroke(
+            width = 1.dp.toPx(),
+            pathEffect = PathEffect.dashPathEffect(floatArrayOf(4.dp.toPx(), 3.dp.toPx()))
+        )
+
+        for (index in 0..2) {
+            val center = Offset(size.width * (0.25f + index * 0.25f), size.height * 0.50f)
+            rotate(degrees = (index - 1) * 18f, pivot = center) {
+                drawRoundRect(
+                    color = Color.White.copy(alpha = 0.30f),
+                    topLeft = center - Offset(cardWidth / 2f, cardHeight / 2f),
+                    size = Size(cardWidth, cardHeight),
+                    cornerRadius = corner,
+                    style = dashedStroke
+                )
+            }
+        }
+    }
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun PlaylistItemRow(
@@ -764,16 +899,15 @@ private fun PlaylistItemRow(
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = playlist.name,
-                style = MaterialTheme.typography.titleMedium.copy(fontSize = 15.sp),
-                fontWeight = FontWeight.Bold,
+                style = MaterialTheme.typography.titleSmall,
                 color = TextPrimary,
                 maxLines = 1,
                 overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
             )
-            Spacer(modifier = Modifier.height(3.dp))
+            Spacer(modifier = Modifier.height(2.dp))
             Text(
                 text = "Playlist • ${playlist.tracks.size} songs",
-                style = MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp),
+                style = MaterialTheme.typography.bodySmall,
                 color = TextSecondary
             )
         }

@@ -4,7 +4,7 @@ import androidx.compose.ui.graphics.Color
 
 enum class NowPlayingStyle(val label: String) {
     SPOTIFY("Spotify Encore"),
-    LIQUID_GLASS("Blur - Liquid Glass")
+    LIQUID_GLASS("Apple Music")
 }
 
 enum class PlaybackMode(val label: String) {
@@ -137,57 +137,111 @@ data class EqualizerPreset(
     val subtitle: String,
     val bandsDb: List<Float>, // 10 bands: 31Hz..16kHz (-12f..+12f)
     val preampGain: Float = 1.0f
+) {
+    val preampDb: Float
+        get() {
+            val loudest = bandsDb.maxOrNull() ?: 0f
+            return if (loudest > 0f) -loudest else 0f
+        }
+}
+
+val EQUALIZER_BAND_LABELS = listOf("31", "62", "125", "250", "500", "1k", "2k", "4k", "8k", "16k")
+
+val SIMPMUSIC_ALL_EQ_PRESETS: List<EqualizerPreset> = listOf(
+    EqualizerPreset("flat", "Flat", "Reference neutral curve", listOf(0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f)),
+    EqualizerPreset("acoustic", "Acoustic", "Warm acoustic tone", listOf(4f, 4f, 3f, 1f, 1.5f, 1.5f, 3f, 3.5f, 3f, 1.5f)),
+    EqualizerPreset("bass_booster", "Bass booster", "Deep low-end impact", listOf(6f, 5.5f, 4.5f, 2.5f, 0.5f, 0f, 0f, 0f, 0f, 0f)),
+    EqualizerPreset("bass_reducer", "Bass reducer", "Clean attenuated lows", listOf(-6f, -5.5f, -4.5f, -2.5f, -0.5f, 0f, 0f, 0f, 0f, 0f)),
+    EqualizerPreset("classical", "Classical", "Orchestral clarity", listOf(4.5f, 3.5f, 3f, 2.5f, -1.5f, -1.5f, 0f, 2f, 3f, 3.5f)),
+    EqualizerPreset("dance", "Dance", "Club kick and airy top", listOf(5f, 6f, 3.5f, 0f, 2f, 3f, 4f, 4f, 3f, 0f)),
+    EqualizerPreset("deep", "Deep", "Atmospheric sub presence", listOf(6f, 5f, 3f, 1.5f, 3f, 2f, 0.5f, -2.5f, -4f, -5f)),
+    EqualizerPreset("electronic", "Electronic", "Punchy synth brilliance", listOf(5f, 4.5f, 1.5f, 0f, -1.5f, 2f, 1f, 1.5f, 4.5f, 5f)),
+    EqualizerPreset("hip_hop", "HipHop", "Heavy 808s and crisp snares", listOf(6f, 5f, 1.5f, 3f, -1f, -1f, 1.5f, -1f, 2f, 3f)),
+    EqualizerPreset("jazz", "Jazz", "Upright bass and brass tone", listOf(4f, 3f, 1.5f, 2f, -1.5f, -1.5f, 0f, 1.5f, 3f, 4f)),
+    EqualizerPreset("latin", "Latin", "Percussive presence", listOf(5f, 3f, 0f, 0f, -1.5f, -1.5f, -1.5f, 0f, 3f, 5f)),
+    EqualizerPreset("loudness", "Loudness", "Low/high frequency boost", listOf(6f, 5f, 0f, 0f, -2f, 0f, -1f, -5f, 5f, 1f)),
+    EqualizerPreset("lounge", "Lounge", "Relaxed chilled vibes", listOf(-3f, -1.5f, -0.5f, 1.5f, 4f, 2.5f, 0f, -1.5f, 2f, 1f)),
+    EqualizerPreset("piano", "Piano", "Keys resonance and warmth", listOf(3f, 2f, 0f, 2.5f, 3f, 1f, 2f, 4f, 3f, 3f)),
+    EqualizerPreset("pop", "Pop", "Crisp vocal and snappy beat", listOf(-1.5f, -1f, 0f, 2f, 4f, 4f, 2f, 0f, -1f, -1.5f)),
+    EqualizerPreset("rnb", "RnB", "Warm sub bass and silky sheen", listOf(5.5f, 6f, 4.5f, 1f, -2.5f, -1f, 2.5f, 3f, 3.5f, 4f)),
+    EqualizerPreset("rock", "Rock", "Biting guitars and tight drums", listOf(5f, 4f, 3f, 1.5f, -0.5f, -1f, 0.5f, 3f, 4f, 4.5f)),
+    EqualizerPreset("small_speakers", "Small speakers", "Earbuds and portable speaker boost", listOf(6f, 5f, 3.5f, 2f, 0f, -0.5f, 0f, 1.5f, 2.5f, 2f)),
+    EqualizerPreset("spoken_word", "Spoken word", "Vocal clarity and podcasts", listOf(-4f, -3.5f, -2f, 0f, 3f, 4.5f, 5f, 4f, 2f, -1f)),
+    EqualizerPreset("treble_booster", "Treble booster", "Airy harmonic brilliance", listOf(0f, 0f, 0f, 0f, 0f, 0f, 2.5f, 4.5f, 5.5f, 6f)),
+    EqualizerPreset("treble_reducer", "Treble reducer", "Gentle non-fatiguing high cut", listOf(0f, 0f, 0f, 0f, 0f, 0f, -2.5f, -4.5f, -5.5f, -6f)),
+    EqualizerPreset("vocal_booster", "Vocal booster", "Lead vocal articulation", listOf(-2.5f, -3f, -2.5f, 1.5f, 4f, 4f, 3.5f, 2f, 0f, -1.5f))
 )
 
-val SIMPMUSIC_EQ_PRESETS = listOf(
-    EqualizerPreset(
-        id = "balanced",
-        name = "Balanced Sound",
-        subtitle = "Natural and clean audio profile",
-        bandsDb = listOf(4.2f, 3.5f, 1.8f, -0.4f, -1.2f, 0.6f, 2.4f, 3.8f, 2.9f, 1.5f),
-        preampGain = 0.92f
-    ),
-    EqualizerPreset(
-        id = "bass_boost",
-        name = "Bass Booster",
-        subtitle = "Rich and deep low frequencies",
-        bandsDb = listOf(6.5f, 5.2f, 3.4f, 1.0f, 0f, 0f, 0.5f, 1.2f, 1.5f, 1.0f),
-        preampGain = 0.86f
-    ),
-    EqualizerPreset(
-        id = "vocal_booster",
-        name = "Vocal Booster",
-        subtitle = "Enhanced vocals and speech clarity",
-        bandsDb = listOf(-1.5f, -1.0f, 0.5f, 2.8f, 4.2f, 4.0f, 2.5f, 1.0f, 0f, -0.5f),
-        preampGain = 0.94f
-    ),
-    EqualizerPreset(
-        id = "treble_booster",
-        name = "Treble Booster",
-        subtitle = "Crisp, bright acoustic highs",
-        bandsDb = listOf(4.5f, 3.8f, 1.2f, -1.0f, -1.5f, -0.5f, 2.0f, 4.0f, 5.2f, 4.8f),
-        preampGain = 0.90f
-    ),
-    EqualizerPreset(
-        id = "studio",
-        name = "Studio Reference",
-        subtitle = "Uncolored, authentic sound",
-        bandsDb = listOf(0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f),
-        preampGain = 1.0f
-    ),
-    EqualizerPreset(
-        id = "late_night",
-        name = "Late Night Lounge",
-        subtitle = "Soft dynamics for quiet listening",
-        bandsDb = listOf(3.0f, 2.5f, 1.5f, 0.5f, 0f, -1.0f, -1.5f, -1.0f, 0.5f, 1.5f),
-        preampGain = 0.88f
-    )
-)
+fun findMatchingPreset(bands: List<Float>): EqualizerPreset? {
+    return SIMPMUSIC_ALL_EQ_PRESETS.firstOrNull { preset ->
+        preset.bandsDb.indices.all { i -> kotlin.math.abs(preset.bandsDb[i] - bands.getOrElse(i) { 0f }) < 0.05f }
+    }
+}
+
+val SIMPMUSIC_EQ_PRESETS = SIMPMUSIC_ALL_EQ_PRESETS
 
 data class MoodCategory(
     val title: String,
     val query: String,
     val accentHex: Long
+)
+
+object YtmMoodBrowseParams {
+    const val ENERGIZE = "ggM8SgQIBxABSgQIBRABSgQICRADSgQIChABSgQIDRABSgQICBABSgQIBBABSgQIDhABSgQIAxABSgQIBhAB"
+    const val RELAX = "ggM8SgQIBxADSgQIBRABSgQICRABSgQIChABSgQIDRABSgQICBABSgQIBBABSgQIDhABSgQIAxABSgQIBhAB"
+    const val FEEL_GOOD = "ggM8SgQIBxABSgQIBRABSgQICRABSgQIChABSgQIDRABSgQICBADSgQIBBABSgQIDhABSgQIAxABSgQIBhAB"
+    const val PARTY = "ggM8SgQIBxABSgQIBRABSgQICRABSgQIChABSgQIDRABSgQICBABSgQIBBABSgQIDhADSgQIAxABSgQIBhAB"
+    const val COMMUTE = "ggM8SgQIBxABSgQIBRABSgQICRABSgQIChABSgQIDRABSgQICBABSgQIBBABSgQIDhABSgQIAxADSgQIBhAB"
+    const val WORKOUT = "ggM8SgQIBxABSgQIBRABSgQICRABSgQIChABSgQIDRABSgQICBABSgQIBBADSgQIDhABSgQIAxABSgQIBhAB"
+    const val ROMANCE = "ggM8SgQIBxABSgQIBRABSgQICRABSgQIChABSgQIDRADSgQICBABSgQIBBABSgQIDhABSgQIAxABSgQIBhAB"
+    const val SAD = "ggM8SgQIBxABSgQIBRABSgQICRABSgQIChADSgQIDRABSgQICBABSgQIBBABSgQIDhABSgQIAxABSgQIBhAB"
+    const val FOCUS = "ggM8SgQIBxABSgQIBRABSgQICRABSgQIChABSgQIDRABSgQICBABSgQIBBABSgQIDhABSgQIAxABSgQIBhAD"
+    const val SLEEP = "ggM8SgQIBxABSgQIBRADSgQICRABSgQIChABSgQIDRABSgQICBABSgQIBBABSgQIDhABSgQIAxABSgQIBhAB"
+
+    val ALL_MOODS = listOf(
+        "Energize",
+        "Relax",
+        "Feel good",
+        "Party",
+        "Commute",
+        "Workout",
+        "Romance",
+        "Sad",
+        "Focus",
+        "Sleep"
+    )
+
+    val PARAMS_MAP = mapOf(
+        "Energize" to ENERGIZE,
+        "Relax" to RELAX,
+        "Feel good" to FEEL_GOOD,
+        "Party" to PARTY,
+        "Commute" to COMMUTE,
+        "Workout" to WORKOUT,
+        "Romance" to ROMANCE,
+        "Sad" to SAD,
+        "Focus" to FOCUS,
+        "Sleep" to SLEEP
+    )
+
+    val DEFAULT_BACKGROUNDS = mapOf(
+        "Energize" to "https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=1400&auto=format&fit=crop&q=80",
+        "Relax" to "https://images.unsplash.com/photo-1519681393784-d120267933ba?w=1400&auto=format&fit=crop&q=80",
+        "Feel good" to "https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=1400&auto=format&fit=crop&q=80",
+        "Party" to "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=1400&auto=format&fit=crop&q=80",
+        "Commute" to "https://images.unsplash.com/photo-1519501025264-65ba15a82390?w=1400&auto=format&fit=crop&q=80",
+        "Workout" to "https://images.unsplash.com/photo-1534438327276-14e5300c3a48?w=1400&auto=format&fit=crop&q=80",
+        "Romance" to "https://images.unsplash.com/photo-1507400492013-162706c8c05e?w=1400&auto=format&fit=crop&q=80",
+        "Sad" to "https://images.unsplash.com/photo-1515694346937-94d85e41e6f0?w=1400&auto=format&fit=crop&q=80",
+        "Focus" to "https://images.unsplash.com/photo-1509198397868-475647b2a1e5?w=1400&auto=format&fit=crop&q=80",
+        "Sleep" to "https://images.unsplash.com/photo-1505118380757-91f5f5632de0?w=1400&auto=format&fit=crop&q=80"
+    )
+}
+
+data class MoodBrowseResult(
+    val backgroundUrl: String?,
+    val tracks: List<AuraTrack>,
+    val albums: List<AuraTrack> = emptyList()
 )
 
 data class YtmChartSection(
@@ -210,6 +264,7 @@ data class ListeningStats(
     val tracksPlayed: Int = 0,
     val topArtists: List<Pair<String, Int>> = emptyList(),
     val topGenres: List<Pair<String, Int>> = emptyList(),
+    val topTracks: List<Pair<AuraTrack, Int>> = emptyList(),
     val peakHourLabel: String = "10:00 PM"
 )
 
@@ -276,7 +331,47 @@ data class ArtistDetail(
     val bannerUrl: String,
     val topSongs: List<ArtistSong>,
     val albums: List<ArtistAlbum> = emptyList(),
-    val carousels: List<ArtistCarousel> = emptyList()
+    val carousels: List<ArtistCarousel> = emptyList(),
+    val description: String = "",
+    val motion: ArtistMotion? = null,
+    val motionLoading: Boolean = false
+)
+
+/** YouTube video owner and engagement details used below the now-playing lyrics. */
+data class AuraVideoInfo(
+    val videoId: String,
+    val author: String = "",
+    val authorId: String? = null,
+    val authorThumbnail: String? = null,
+    val description: String = "",
+    val subscribers: String = "",
+    val uploadDate: String = "",
+    val viewCount: Long = 0L,
+    val likes: Long = 0L,
+    val dislikes: Long = 0L
+)
+
+data class ArtistMotion(
+    val squareVideoUrl: String? = null,
+    val squarePreviewUrl: String? = null,
+    val wideVideoUrl: String? = null,
+    val widePreviewUrl: String? = null
+)
+
+data class AuraYouTubeComment(
+    val id: String,
+    val author: String,
+    val avatarUrl: String?,
+    val text: String,
+    val publishedTime: String,
+    val likeCount: String
+)
+
+data class AuraCommentsPage(
+    val countText: String?,
+    val comments: List<AuraYouTubeComment>,
+    val continuation: String? = null,
+    val commentsDisabled: Boolean = false
 )
 
 data class PlaylistTrackItem(

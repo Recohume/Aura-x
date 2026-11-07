@@ -9,6 +9,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.unit.sp
 import androidx.palette.graphics.Palette
 import com.auramusic.app.core.extractor.SimpMusicExtractorEngine
@@ -71,37 +72,107 @@ val AuraDarkScheme = darkColorScheme(
     onSurfaceVariant = TextSecondary
 )
 
+val AuraPoppinsFontFamily = FontFamily(
+    Font(com.auramusic.app.R.font.aura_poppins_regular, FontWeight.Normal),
+    Font(com.auramusic.app.R.font.aura_poppins_medium, FontWeight.Medium),
+    Font(com.auramusic.app.R.font.aura_poppins_medium, FontWeight.SemiBold),
+    Font(com.auramusic.app.R.font.aura_poppins_medium, FontWeight.Bold),
+    Font(com.auramusic.app.R.font.aura_poppins_bold, FontWeight.ExtraBold),
+    Font(com.auramusic.app.R.font.aura_poppins_bold, FontWeight.Black)
+)
+
 val AuraTypography = Typography(
+    displayLarge = TextStyle(
+        fontFamily = AuraPoppinsFontFamily,
+        fontWeight = FontWeight.Normal,
+        fontSize = 20.sp,
+        color = TextPrimary
+    ),
+    displayMedium = TextStyle(
+        fontFamily = AuraPoppinsFontFamily,
+        fontWeight = FontWeight.Normal,
+        fontSize = 18.sp,
+        color = TextPrimary
+    ),
+    displaySmall = TextStyle(
+        fontFamily = AuraPoppinsFontFamily,
+        fontWeight = FontWeight.Normal,
+        fontSize = 16.sp,
+        color = TextPrimary
+    ),
     headlineLarge = TextStyle(
-        fontFamily = FontFamily.SansSerif,
+        fontFamily = AuraPoppinsFontFamily,
         fontWeight = FontWeight.Bold,
-        fontSize = 28.sp,
+        fontSize = 24.sp,
         letterSpacing = (-0.5).sp,
         color = TextPrimary
     ),
+    headlineMedium = TextStyle(
+        fontFamily = AuraPoppinsFontFamily,
+        fontWeight = FontWeight.Bold,
+        fontSize = 20.sp,
+        letterSpacing = (-0.3).sp,
+        color = TextPrimary
+    ),
+    headlineSmall = TextStyle(
+        fontFamily = AuraPoppinsFontFamily,
+        fontWeight = FontWeight.SemiBold,
+        fontSize = 18.sp,
+        color = TextPrimary
+    ),
     titleLarge = TextStyle(
-        fontFamily = FontFamily.SansSerif,
+        fontFamily = AuraPoppinsFontFamily,
         fontWeight = FontWeight.Bold,
         fontSize = 22.sp,
         letterSpacing = (-0.3).sp,
         color = TextPrimary
     ),
     titleMedium = TextStyle(
-        fontFamily = FontFamily.SansSerif,
+        fontFamily = AuraPoppinsFontFamily,
         fontWeight = FontWeight.SemiBold,
-        fontSize = 15.sp,
+        fontSize = 18.sp,
+        color = TextPrimary
+    ),
+    titleSmall = TextStyle(
+        fontFamily = AuraPoppinsFontFamily,
+        fontWeight = FontWeight.SemiBold,
+        fontSize = 13.sp,
+        color = TextPrimary
+    ),
+    bodyLarge = TextStyle(
+        fontFamily = AuraPoppinsFontFamily,
+        fontWeight = FontWeight.Normal,
+        fontSize = 18.sp,
         color = TextPrimary
     ),
     bodyMedium = TextStyle(
-        fontFamily = FontFamily.SansSerif,
+        fontFamily = AuraPoppinsFontFamily,
         fontWeight = FontWeight.Normal,
         fontSize = 13.sp,
         color = TextSecondary
     ),
-    labelSmall = TextStyle(
-        fontFamily = FontFamily.SansSerif,
-        fontWeight = FontWeight.Bold,
+    bodySmall = TextStyle(
+        fontFamily = AuraPoppinsFontFamily,
+        fontWeight = FontWeight.Normal,
         fontSize = 11.sp,
+        color = TextSecondary
+    ),
+    labelLarge = TextStyle(
+        fontFamily = AuraPoppinsFontFamily,
+        fontWeight = FontWeight.SemiBold,
+        fontSize = 15.sp,
+        color = TextPrimary
+    ),
+    labelMedium = TextStyle(
+        fontFamily = AuraPoppinsFontFamily,
+        fontWeight = FontWeight.Bold,
+        fontSize = 14.sp,
+        color = TextSecondary
+    ),
+    labelSmall = TextStyle(
+        fontFamily = AuraPoppinsFontFamily,
+        fontWeight = FontWeight.SemiBold,
+        fontSize = 12.sp,
         letterSpacing = 0.5.sp,
         color = AuraSageGreen
     )

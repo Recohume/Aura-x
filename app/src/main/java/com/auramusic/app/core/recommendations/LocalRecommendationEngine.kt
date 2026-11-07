@@ -63,11 +63,22 @@ object LocalRecommendationEngine {
         return selected.take(limit).map { it.track }
     }
 
-    fun categoryMatches(track: AuraTrack, categoryCandidates: List<AuraTrack>): Boolean {
-        if (categoryCandidates.isEmpty()) return false
+    fun buildCategoryFilterContext(categoryCandidates: List<AuraTrack>): Pair<Set<String>, Set<String>> {
+        if (categoryCandidates.isEmpty()) return emptySet<String>() to emptySet<String>()
         val relatedArtists = categoryCandidates.flatMap { splitArtists(it.artist) }.toSet()
         val relatedGenres = categoryCandidates.map { normalize(it.genre) }.filter(String::isNotBlank).toSet()
+        return relatedArtists to relatedGenres
+    }
+
+    fun categoryMatches(track: AuraTrack, relatedArtists: Set<String>, relatedGenres: Set<String>): Boolean {
+        if (relatedArtists.isEmpty() && relatedGenres.isEmpty()) return false
         return splitArtists(track.artist).any { it in relatedArtists } || normalize(track.genre) in relatedGenres
+    }
+
+    fun categoryMatches(track: AuraTrack, categoryCandidates: List<AuraTrack>): Boolean {
+        if (categoryCandidates.isEmpty()) return false
+        val (relatedArtists, relatedGenres) = buildCategoryFilterContext(categoryCandidates)
+        return categoryMatches(track, relatedArtists, relatedGenres)
     }
 
     private fun addTaste(

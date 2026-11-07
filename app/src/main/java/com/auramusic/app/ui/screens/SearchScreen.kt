@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -58,6 +59,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
@@ -72,7 +74,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import coil.compose.AsyncImage
+import com.auramusic.app.ui.components.AudioPlayingIndicator
 import com.auramusic.app.core.media.AuraPlayerManager
 import com.auramusic.app.domain.model.ArtistCarouselItem
 import com.auramusic.app.domain.model.AuraPlaylist
@@ -117,7 +121,7 @@ private val CURATED_BROWSE_CATEGORIES = listOf(
     BrowseCategory("Pop", Color(0xFFFF4632), "https://lh3.googleusercontent.com/sc_b2=w544-h544-l90-rj", "Pop Hits"),
     BrowseCategory("Hip-Hop", Color(0xFFBA5D07), "https://lh3.googleusercontent.com/RCpTA6EXJQyjVFDosWOKa2SMmqkua_lA9mHPDWWciLwgqpZLz9fS3xYq9R0_L9kF=w544-h544-l90-rj", "Hip Hop"),
     BrowseCategory("Rock", Color(0xFFE91429), "https://lh3.googleusercontent.com/f0uIq9s7qQYV4f_4zB1=w544-h544-l90-rj", "Rock Classics"),
-    BrowseCategory("Anime & J-Pop", Color(0xFF0D72EC), "https://lh3.googleusercontent.com/hnefGBrazRhn4Z92bdSZBUENl40ONjRiVDsmZKZh-WZ2iCKE-W_YyJtZ_fL4w=w544-h544-l90-rj", "Eve Anime"),
+    BrowseCategory("Anime & J-Pop", Color(0xFF0D72EC), "https://lh3.googleusercontent.com/hnefGBrazRhn4Z92bdSZBUENl40ONjRiVDsmZKZh-WZ2iCKE-W_YyJtZ_fL4w=w544-h544-l90-rj", "Anime Jpop"),
     BrowseCategory("Chill & Lo-Fi", Color(0xFF148A08), "https://lh3.googleusercontent.com/zV8Q8k=w544-h544-l90-rj", "Lofi Chill"),
     BrowseCategory("Charts", Color(0xFF8D67AB), "https://lh3.googleusercontent.com/k9_a1=w544-h544-l90-rj", "Top 50")
 )
@@ -144,7 +148,9 @@ fun SearchScreen(
     matchedArtists: List<YtmTopArtist> = emptyList(),
     artistFeaturingItems: List<ArtistCarouselItem> = emptyList(),
     playlistResults: List<YtmCommunityPlaylist> = emptyList(),
+    exploreArtworkTracks: Map<String, List<AuraTrack>> = emptyMap(),
     currentPlayingId: String? = null,
+    isPlaying: Boolean = false,
     onQueryChange: (String) -> Unit,
     onFilterChange: (String) -> Unit,
     onPlayTrack: (AuraTrack, List<AuraTrack>) -> Unit,
@@ -196,6 +202,7 @@ fun SearchScreen(
             // 1. SEARCH EXPLORE SCREEN (Default Browse Mode matching Image 1)
             // =========================================================================
             SearchExploreView(
+                exploreArtworkTracks = exploreArtworkTracks,
                 onSearchFieldClick = {
                     isSearchActive = true
                 },
@@ -224,6 +231,7 @@ fun SearchScreen(
                 artistFeaturingItems = artistFeaturingItems,
                 playlistResults = playlistResults,
                 currentPlayingId = currentPlayingId,
+                isPlaying = isPlaying,
                 focusRequester = focusRequester,
                 onBackClick = {
                     onQueryChange("")
@@ -347,6 +355,7 @@ fun SearchScreen(
  */
 @Composable
 private fun SearchExploreView(
+    exploreArtworkTracks: Map<String, List<AuraTrack>>,
     onSearchFieldClick: () -> Unit,
     onCategoryClick: (BrowseCategory) -> Unit,
     onWatchPlaylistClick: (WatchPlaylistCard) -> Unit
@@ -432,6 +441,7 @@ private fun SearchExploreView(
                     Box(modifier = Modifier.weight(1f)) {
                         SpotifyCategoryCard(
                             category = category,
+                            artworkTracks = exploreArtworkTracks[category.title].orEmpty(),
                             onClick = { onCategoryClick(category) }
                         )
                     }
@@ -498,6 +508,7 @@ private fun SearchExploreView(
                     Box(modifier = Modifier.weight(1f)) {
                         SpotifyCategoryCard(
                             category = category,
+                            artworkTracks = exploreArtworkTracks[category.title].orEmpty(),
                             onClick = { onCategoryClick(category) }
                         )
                     }
@@ -517,6 +528,7 @@ private fun SearchExploreView(
 @Composable
 private fun SpotifyCategoryCard(
     category: BrowseCategory,
+    artworkTracks: List<AuraTrack>,
     onClick: () -> Unit
 ) {
     Box(
@@ -527,21 +539,48 @@ private fun SpotifyCategoryCard(
             .background(category.backgroundColor)
             .clickable(onClick = onClick)
     ) {
-        // Rotated cover art image overflowing the bottom right edge
-        AsyncImage(
-            model = category.artworkUrl,
-            contentDescription = null,
-            contentScale = ContentScale.Crop,
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .graphicsLayer {
-                    translationX = 14.dp.toPx()
-                    translationY = 8.dp.toPx()
-                    rotationZ = 25f
+        if (artworkTracks.size >= 2) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .graphicsLayer {
+                        translationX = 14.dp.toPx()
+                        translationY = 8.dp.toPx()
+                    }
+                    .size(width = 96.dp, height = 84.dp)
+            ) {
+                artworkTracks.take(3).forEachIndexed { index, track ->
+                    AsyncImage(
+                        model = track.highResArtworkUrl,
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .align(Alignment.Center)
+                            .offset(x = ((index - 1) * 21).dp, y = 5.dp)
+                            .rotate((index - 1) * 16f)
+                            .zIndex(index.toFloat())
+                            .size(width = 48.dp, height = 58.dp)
+                            .clip(RoundedCornerShape(6.dp))
+                    )
                 }
-                .size(68.dp)
-                .clip(RoundedCornerShape(6.dp))
-        )
+            }
+        } else {
+            // Keep curated fallback artwork visible while category covers load.
+            AsyncImage(
+                model = category.artworkUrl,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .graphicsLayer {
+                        translationX = 14.dp.toPx()
+                        translationY = 8.dp.toPx()
+                        rotationZ = 25f
+                    }
+                    .size(68.dp)
+                    .clip(RoundedCornerShape(6.dp))
+            )
+        }
 
         // Category Title
         Text(
@@ -656,6 +695,7 @@ private fun DedicatedSearchingView(
     artistFeaturingItems: List<ArtistCarouselItem>,
     playlistResults: List<YtmCommunityPlaylist> = emptyList(),
     currentPlayingId: String?,
+    isPlaying: Boolean = false,
     focusRequester: FocusRequester,
     onBackClick: () -> Unit,
     onQueryChange: (String) -> Unit,
@@ -885,8 +925,11 @@ private fun DedicatedSearchingView(
                 } else {
                     items(recentlyPlayed, key = { "recent_${it.videoId}" }) { track ->
                         val isFav = favorites.any { it.videoId == track.videoId }
+                        val isCurrent = currentPlayingId == track.videoId
                         RecentPlayedTrackRow(
                             track = track,
+                            isCurrent = isCurrent,
+                            isPlaying = isPlaying,
                             isFavorite = isFav,
                             onClick = { onPlayTrack(track, recentlyPlayed) },
                             onOptionsClick = { onOptionsClick(track) },
@@ -1009,6 +1052,7 @@ private fun DedicatedSearchingView(
                         SearchResultSongTile(
                             track = track,
                             isCurrent = isCurrent,
+                            isPlaying = isPlaying,
                             isFavorite = isFav,
                             onClick = {
                                 focusManager.clearFocus()
@@ -1037,12 +1081,15 @@ private fun DedicatedSearchingView(
 @Composable
 private fun RecentPlayedTrackRow(
     track: AuraTrack,
+    isCurrent: Boolean = false,
+    isPlaying: Boolean = false,
     isFavorite: Boolean,
     onClick: () -> Unit,
     onOptionsClick: () -> Unit,
     onToggleFavorite: () -> Unit,
     onRemove: () -> Unit
 ) {
+    val isTrackPlaying = isCurrent && isPlaying
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -1050,14 +1097,33 @@ private fun RecentPlayedTrackRow(
             .padding(horizontal = 20.dp, vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        AsyncImage(
-            model = track.highResArtworkUrl.ifBlank { "https://i.ytimg.com/vi/${track.videoId}/hqdefault.jpg" },
-            contentDescription = track.title,
-            contentScale = ContentScale.Crop,
+        Box(
             modifier = Modifier
                 .size(52.dp)
                 .clip(RoundedCornerShape(8.dp))
-        )
+                .background(Color(0xFF202127)),
+            contentAlignment = Alignment.Center
+        ) {
+            AsyncImage(
+                model = track.highResArtworkUrl.ifBlank { "https://i.ytimg.com/vi/${track.videoId}/hqdefault.jpg" },
+                contentDescription = track.title,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
+            if (isTrackPlaying) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = 0.55f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    AudioPlayingIndicator(
+                        modifier = Modifier.fillMaxSize(0.70f),
+                        color = AuraNeonLime
+                    )
+                }
+            }
+        }
 
         Spacer(modifier = Modifier.width(14.dp))
 
@@ -1066,18 +1132,17 @@ private fun RecentPlayedTrackRow(
         ) {
             Text(
                 text = track.title,
-                fontSize = 14.5.sp,
-                fontWeight = FontWeight.Bold,
+                style = MaterialTheme.typography.titleSmall,
                 color = Color.White,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
 
-            Spacer(modifier = Modifier.height(3.dp))
+            Spacer(modifier = Modifier.height(2.dp))
 
             Text(
                 text = "Song • ${track.artist}",
-                fontSize = 12.5.sp,
+                style = MaterialTheme.typography.bodySmall,
                 color = Color(0xFFA0A5B5),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
@@ -1321,12 +1386,14 @@ private fun SearchResultPlaylistTile(
 private fun SearchResultSongTile(
     track: AuraTrack,
     isCurrent: Boolean,
+    isPlaying: Boolean = false,
     isFavorite: Boolean,
     onClick: () -> Unit,
     onToggleFavorite: () -> Unit,
     onOptionsClick: () -> Unit,
     onOpenArtist: (String, String) -> Unit = { _, _ -> }
 ) {
+    val isTrackPlaying = isCurrent && isPlaying
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -1337,14 +1404,33 @@ private fun SearchResultSongTile(
             .padding(horizontal = 20.dp, vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        AsyncImage(
-            model = track.highResArtworkUrl.ifBlank { "https://i.ytimg.com/vi/${track.videoId}/hqdefault.jpg" },
-            contentDescription = track.title,
-            contentScale = ContentScale.Crop,
+        Box(
             modifier = Modifier
                 .size(52.dp)
                 .clip(RoundedCornerShape(8.dp))
-        )
+                .background(Color(0xFF202127)),
+            contentAlignment = Alignment.Center
+        ) {
+            AsyncImage(
+                model = track.highResArtworkUrl.ifBlank { "https://i.ytimg.com/vi/${track.videoId}/hqdefault.jpg" },
+                contentDescription = track.title,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
+            if (isTrackPlaying) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = 0.55f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    AudioPlayingIndicator(
+                        modifier = Modifier.fillMaxSize(0.70f),
+                        color = AuraNeonLime
+                    )
+                }
+            }
+        }
 
         Spacer(modifier = Modifier.width(14.dp))
 
