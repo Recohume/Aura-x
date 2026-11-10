@@ -108,3 +108,29 @@ Download the latest available APK from the repository's Releases section.
 
 
 EFO
+
+## 🔒 Privacy
+
+AURA X is designed with user privacy in mind. Please review the source code and individual service permissions to understand how data is handled.
+
+## ⚖️ Legal Disclaimer
+
+AURA X is an independent open-source project. All third-party names, trademarks, libraries and services belong to their respective owners.
+
+## 📄 License
+
+This project is distributed under the GNU General Public License v3.0 (GPL-3.0), subject to the original repository license and applicable notices.
+
+See the `LICENSE` file for the complete terms.
+
+---
+
+<div align="center">
+
+### A U R A X
+
+**YOUR MUSIC. YOUR EXPERIENCE.**
+
+*Made with passion for music lovers.*
+
+</div>
