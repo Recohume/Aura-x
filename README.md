@@ -1,18 +1,18 @@
 <div align="center">
 
-<img src="./assets/icon.png" width="160" style="border-radius: 36px; box-shadow: 0 10px 40px rgba(0,0,0,0.6);" alt="Aura Icon"/>
+<img src="./app/src/main/res/drawable/aura_logo.png" width="160" alt="AURA X Logo"/>
 
-# Aura
+# A U R A  X
 
 ### Next-Generation FOSS YouTube Music Client for Android
 Built with **100% Native Kotlin**, **Jetpack Compose (Material 3)**, **AndroidX Media3 (ExoPlayer)**, and an ultra-fast, direct **Client-First InnerTube & PipePipe Extraction Engine**.
 
 <br/>
 
-[![Platform](https://img.shields.io/badge/Platform-Android%208.0%2B%20(API%2026%2B)-3DDC84.svg?style=for-the-badge&logo=android&logoColor=white)](https://android.com)
+[![Platform](https://img.shields.io/badge/Platform-Android%208.0%2B%20(API%2026%2B)-68DFFF.svg?style=for-the-badge&logo=android&logoColor=white)](https://android.com)
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.1.0-7F52FF.svg?style=for-the-badge&logo=kotlin&logoColor=white)](https://kotlinlang.org)
 [![Jetpack Compose](https://img.shields.io/badge/Jetpack%20Compose-Material%203-4285F4.svg?style=for-the-badge&logo=jetpackcompose&logoColor=white)](https://developer.android.com/jetpack/compose)
-[![Media3 ExoPlayer](https://img.shields.io/badge/Media3%20ExoPlayer-1.5.1-FF6F00.svg?style=for-the-badge)](https://developer.android.com/guide/topics/media/media3)
+[![Media3 ExoPlayer](https://img.shields.io/badge/Media3%20ExoPlayer-1.5.1-927CFF.svg?style=for-the-badge)](https://developer.android.com/guide/topics/media/media3)
 [![License](https://img.shields.io/badge/License-GPL--3.0-blue.svg?style=for-the-badge)](LICENSE)
 [![Zero Ads](https://img.shields.io/badge/Ads-0%25%20Zero%20Ads-brightgreen.svg?style=for-the-badge)]()
 [![No Backend Required](https://img.shields.io/badge/Architecture-100%25%20Client--First-purple.svg?style=for-the-badge)]()
@@ -23,9 +23,9 @@ Built with **100% Native Kotlin**, **Jetpack Compose (Material 3)**, **AndroidX 
   <a href="https://github.com/topics/android"><img src="https://img.shields.io/badge/topic-android-007EC6?style=flat-square" alt="android"/></a>
   <a href="https://github.com/topics/kotlin"><img src="https://img.shields.io/badge/topic-kotlin-7F52FF?style=flat-square" alt="kotlin"/></a>
   <a href="https://github.com/topics/jetpack-compose"><img src="https://img.shields.io/badge/topic-jetpack--compose-4285F4?style=flat-square" alt="jetpack-compose"/></a>
-  <a href="https://github.com/topics/media3"><img src="https://img.shields.io/badge/topic-media3-FF6F00?style=flat-square" alt="media3"/></a>
-  <a href="https://github.com/topics/exoplayer"><img src="https://img.shields.io/badge/topic-exoplayer-E65100?style=flat-square" alt="exoplayer"/></a>
-  <a href="https://github.com/topics/youtube-music"><img src="https://img.shields.io/badge/topic-youtube--music-FF0000?style=flat-square" alt="youtube-music"/></a>
+  <a href="https://github.com/topics/media3"><img src="https://img.shields.io/badge/topic-media3-927CFF?style=flat-square" alt="media3"/></a>
+  <a href="https://github.com/topics/exoplayer"><img src="https://img.shields.io/badge/topic-exoplayer-927CFF?style=flat-square" alt="exoplayer"/></a>
+  <a href="https://github.com/topics/youtube-music"><img src="https://img.shields.io/badge/topic-youtube--music-927CFF?style=flat-square" alt="youtube-music"/></a>
   <a href="https://github.com/topics/innertube"><img src="https://img.shields.io/badge/topic-innertube-282828?style=flat-square" alt="innertube"/></a>
   <a href="https://github.com/topics/simpmusic"><img src="https://img.shields.io/badge/topic-simpmusic-673AB7?style=flat-square" alt="simpmusic"/></a>
   <a href="https://github.com/topics/lyrics"><img src="https://img.shields.io/badge/topic-synced--lyrics-00B0FF?style=flat-square" alt="synced-lyrics"/></a>

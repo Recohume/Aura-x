@@ -58,3 +58,6 @@ Thumbs.db
 # Tests
 scripts/
 
+
+# Private Android signing keys
+keystore/*.keystore
