@@ -177,9 +177,8 @@ import com.auramusic.app.ui.components.AuraCommentsBottomSheet
 import com.auramusic.app.ui.theme.AuraCircleButtonBg
 import com.auramusic.app.ui.theme.AuraNeonLime
 import com.auramusic.app.ui.theme.AuraPoppinsFontFamily
-import com.auramusic.app.ui.theme.AuraPlayGreen
+import com.auramusic.app.ui.theme.AuraNeonLime
 import com.auramusic.app.ui.theme.SpotifyCard
-import com.auramusic.app.ui.theme.SpotifyPitchBlack
 import com.auramusic.app.ui.theme.TextPrimary
 import com.auramusic.app.ui.theme.TextSecondary
 
@@ -1218,7 +1217,7 @@ private fun LivePerformancesModal(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        CircularProgressIndicator(color = AuraNeonLime, modifier = Modifier.size(32.dp))
+                        CircularProgressIndicator(color = Color(0xFF68DFFF), modifier = Modifier.size(32.dp))
                         Text(
                             text = "Searching live concert stages & performances…",
                             color = TextSecondary,
@@ -1298,7 +1297,7 @@ private fun LivePerformancesModal(
                             Icon(
                                 imageVector = Icons.Rounded.PlayCircle,
                                 contentDescription = "Play",
-                                tint = AuraNeonLime,
+                                tint = Color(0xFF68DFFF),
                                 modifier = Modifier
                                     .size(28.dp)
                                     .padding(start = 4.dp)
@@ -1565,7 +1564,7 @@ private fun AuraDraggableCoverArt(
                         alpha = 0.4f + 0.6f * dragFraction
                     }
                     .clip(RoundedCornerShape(cornerRadius))
-                    .background(Color(0xFF202020))
+                    .background(Color(0xFF171B2A))
             ) {
                 AsyncImage(
                     model = prevTrack.highResArtworkUrl,
@@ -1589,7 +1588,7 @@ private fun AuraDraggableCoverArt(
                         alpha = 0.4f + 0.6f * dragFraction
                     }
                     .clip(RoundedCornerShape(cornerRadius))
-                    .background(Color(0xFF202020))
+                    .background(Color(0xFF171B2A))
             ) {
                 AsyncImage(
                     model = nextTrack.highResArtworkUrl,
@@ -1614,7 +1613,7 @@ private fun AuraDraggableCoverArt(
                     alpha = if (hideArtworkForLyricsTransition) 0f else (1f - 0.28f * dragFraction)
                 }
                 .clip(RoundedCornerShape(cornerRadius))
-                .background(Color(0xFF242424))
+                .background(Color(0xFF20263A))
         ) {
             AsyncImage(
                 model = currentTrack.highResArtworkUrl,
@@ -1746,7 +1745,7 @@ private fun LiquidGlassPlayerView(
                         text = playingFrom,
                         fontSize = 10.5.sp,
                         fontWeight = FontWeight.Bold,
-                        color = Color.White.copy(alpha = 0.7f),
+                        color = Color(0xFF9BEAFF),
                         letterSpacing = 0.5.sp,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
@@ -1754,7 +1753,7 @@ private fun LiquidGlassPlayerView(
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(
                         text = track.title,
-                        style = MaterialTheme.typography.titleSmall,
+                        style = MaterialTheme.typography.titleMedium,
                         color = Color.White,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
@@ -1806,7 +1805,7 @@ private fun LiquidGlassPlayerView(
                     AuraDraggableCoverArt(
                         currentTrack = track,
                         queue = queue,
-                        cornerRadius = 22.dp,
+                        cornerRadius = 24.dp,
                         hideArtworkForLyricsTransition = hideArtworkForLyricsTransition,
                         onSkipNext = onSkipNext,
                         onSkipPrevious = onSkipPrevious,
@@ -1837,6 +1836,15 @@ private fun LiquidGlassPlayerView(
             Surface(
                 shape = RoundedCornerShape(28.dp),
                 color = Color.White.copy(alpha = 0.10f),
+            border = androidx.compose.foundation.BorderStroke(
+                1.dp,
+                androidx.compose.ui.graphics.Brush.linearGradient(
+                    colors = listOf(
+                        Color(0xFF68DFFF).copy(alpha = 0.42f),
+                        Color(0xFF927CFF).copy(alpha = 0.34f)
+                    )
+                )
+            ),
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 12.dp, vertical = 2.dp)
@@ -1865,7 +1873,7 @@ private fun LiquidGlassPlayerView(
                             Text(
                                 text = track.artist.uppercase(),
                                 style = MaterialTheme.typography.bodySmall,
-                                color = Color.White.copy(alpha = 0.65f),
+                                color = Color(0xFF9BEAFF),
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                                 letterSpacing = 0.6.sp,
@@ -1884,7 +1892,7 @@ private fun LiquidGlassPlayerView(
                                 Icon(
                                     imageVector = Icons.Rounded.AddCircleOutline,
                                     contentDescription = "Add to Queue",
-                                    tint = Color.White.copy(alpha = 0.9f),
+                                    tint = Color(0xFF68DFFF),
                                     modifier = Modifier.size(20.dp)
                                 )
                             }
@@ -1900,7 +1908,7 @@ private fun LiquidGlassPlayerView(
                                 Icon(
                                     imageVector = Icons.Rounded.MoreVert,
                                     contentDescription = "More",
-                                    tint = Color.White.copy(alpha = 0.9f),
+                                    tint = Color(0xFFB69CFF),
                                     modifier = Modifier.size(20.dp)
                                 )
                             }
@@ -1914,8 +1922,8 @@ private fun LiquidGlassPlayerView(
                         value = positionSec.coerceIn(0f, durationSec.coerceAtLeast(1f)),
                         onValueChange = onSeekTo,
                         valueRange = 0f..durationSec.coerceAtLeast(1f),
-                        pointColor = Color.White,
-                        activeTrackColor = Color.White,
+                        pointColor = Color(0xFF68DFFF),
+                        activeTrackColor = Color(0xFF68DFFF),
                         modifier = Modifier.fillMaxWidth()
                     )
 
@@ -1938,8 +1946,8 @@ private fun LiquidGlassPlayerView(
                         // Audio Codec Glass Pill: [ •||• AAC ]
                         Surface(
                             shape = RoundedCornerShape(8.dp),
-                            color = Color.White.copy(alpha = 0.12f),
-                            border = BorderStroke(0.6.dp, Color.White.copy(alpha = 0.25f))
+                            color = Color(0xFF68DFFF).copy(alpha = 0.08f),
+                            border = BorderStroke(0.8.dp, Color(0xFF68DFFF).copy(alpha = 0.30f))
                         ) {
                             Row(
                                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
@@ -1985,7 +1993,7 @@ private fun LiquidGlassPlayerView(
                             Icon(
                                 imageVector = Icons.Rounded.SkipPrevious,
                                 contentDescription = "Previous Track",
-                                tint = Color.White,
+                                tint = Color(0xFFB69CFF),
                                 modifier = Modifier.size(34.dp)
                             )
                         }
@@ -2003,7 +2011,7 @@ private fun LiquidGlassPlayerView(
                                 Icon(
                                     imageVector = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
                                     contentDescription = if (isPlaying) "Pause" else "Play",
-                                    tint = Color.White,
+                                    tint = Color(0xFF101018),
                                     modifier = Modifier.size(46.dp)
                                 )
                             }
@@ -2015,7 +2023,7 @@ private fun LiquidGlassPlayerView(
                             Icon(
                                 imageVector = Icons.Rounded.SkipNext,
                                 contentDescription = "Next Track",
-                                tint = Color.White,
+                                tint = Color(0xFFB69CFF),
                                 modifier = Modifier.size(34.dp)
                             )
                         }
@@ -2091,7 +2099,7 @@ private fun LiquidGlassPlayerView(
                             Icon(
                                 imageVector = Icons.Rounded.Shuffle,
                                 contentDescription = "Shuffle",
-                                tint = if (isShuffleEnabled) AuraPlayGreen else Color.White.copy(alpha = 0.6f),
+                                tint = if (isShuffleEnabled) Color(0xFF68DFFF) else Color.White.copy(alpha = 0.6f),
                                 modifier = Modifier.size(20.dp)
                             )
                         }
@@ -2100,7 +2108,7 @@ private fun LiquidGlassPlayerView(
                             Icon(
                                 imageVector = Icons.AutoMirrored.Rounded.QueueMusic,
                                 contentDescription = "Queue",
-                                tint = Color.White.copy(alpha = 0.8f),
+                                tint = Color(0xFF68DFFF).copy(alpha = 0.8f),
                                 modifier = Modifier.size(22.dp)
                             )
                         }
@@ -2388,7 +2396,7 @@ private fun SpotifyEncorePlayerView(
                     Icon(
                         imageVector = if (isFavorite) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
                         contentDescription = "Favorite",
-                        tint = if (isFavorite) AuraPlayGreen else Color.White,
+                        tint = if (isFavorite) Color(0xFF68DFFF) else Color.White,
                         modifier = Modifier.size(26.dp)
                     )
                 }
@@ -2456,9 +2464,9 @@ private fun SpotifyEncorePlayerView(
                 ) {
                     val (icon, tint) = when (playbackMode) {
                         PlaybackMode.NORMAL -> Icons.Rounded.Shuffle to Color.White.copy(alpha = 0.6f)
-                        PlaybackMode.SHUFFLE -> Icons.Rounded.Shuffle to AuraPlayGreen
-                        PlaybackMode.REPEAT_ALL -> Icons.Rounded.Repeat to AuraPlayGreen
-                        PlaybackMode.REPEAT_ONE -> Icons.Rounded.RepeatOne to AuraPlayGreen
+                        PlaybackMode.SHUFFLE -> Icons.Rounded.Shuffle to Color(0xFF68DFFF)
+                        PlaybackMode.REPEAT_ALL -> Icons.Rounded.Repeat to Color(0xFF68DFFF)
+                        PlaybackMode.REPEAT_ONE -> Icons.Rounded.RepeatOne to Color(0xFF68DFFF)
                     }
                     Icon(
                         imageVector = icon,
@@ -2834,12 +2842,12 @@ private fun FullScreenLyricsCompactHeader(
                     Icon(
                         imageVector = Icons.Rounded.Translate,
                         contentDescription = if (showRomanized) "Romaji lyrics" else "Original lyrics",
-                        tint = if (showRomanized) AuraPlayGreen else Color.White.copy(alpha = 0.82f),
+                        tint = if (showRomanized) Color(0xFF68DFFF) else Color.White.copy(alpha = 0.82f),
                         modifier = Modifier.size(17.dp)
                     )
                     Text(
                         text = if (showRomanized) "Romaji" else "Original",
-                        color = if (showRomanized) AuraPlayGreen else Color.White.copy(alpha = 0.82f),
+                        color = if (showRomanized) Color(0xFF68DFFF) else Color.White.copy(alpha = 0.82f),
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Bold
                     )
@@ -3101,9 +3109,9 @@ private fun FullScreenSongLyricsView(
                             ) {
                                 val (icon, tint) = when (playbackMode) {
                                     PlaybackMode.NORMAL -> Icons.Rounded.Shuffle to Color.White.copy(alpha = 0.5f)
-                                    PlaybackMode.SHUFFLE -> Icons.Rounded.Shuffle to AuraPlayGreen
-                                    PlaybackMode.REPEAT_ALL -> Icons.Rounded.Repeat to AuraPlayGreen
-                                    PlaybackMode.REPEAT_ONE -> Icons.Rounded.RepeatOne to AuraPlayGreen
+                                    PlaybackMode.SHUFFLE -> Icons.Rounded.Shuffle to Color(0xFF68DFFF)
+                                    PlaybackMode.REPEAT_ALL -> Icons.Rounded.Repeat to Color(0xFF68DFFF)
+                                    PlaybackMode.REPEAT_ONE -> Icons.Rounded.RepeatOne to Color(0xFF68DFFF)
                                 }
                                 Icon(
                                     imageVector = icon,
@@ -3219,7 +3227,7 @@ private fun PlayerArtistAndDescription(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(238.dp)
-                    .background(Color(0xFF151515))
+                    .background(Color(0xFF171B2A))
             ) {
                 AsyncImage(
                     model = artistImage,
@@ -3368,7 +3376,7 @@ private fun ArtistSectionPlaybackHeader(
                 Icon(
                     imageVector = if (isFavorite) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
                     contentDescription = if (isFavorite) "Remove from liked songs" else "Like song",
-                    tint = if (isFavorite) AuraNeonLime else Color.White,
+                    tint = if (isFavorite) Color(0xFF68DFFF) else Color.White,
                     modifier = Modifier.size(22.dp)
                 )
             }
@@ -3511,7 +3519,7 @@ private fun QueueSheetContent(
             text = "NOW PLAYING",
             style = MaterialTheme.typography.labelSmall,
             fontWeight = FontWeight.Bold,
-            color = AuraNeonLime,
+            color = Color(0xFF68DFFF),
             letterSpacing = 1.sp
         )
 
@@ -3546,7 +3554,7 @@ private fun QueueSheetContent(
                     ) {
                         AudioPlayingIndicator(
                             modifier = Modifier.fillMaxSize(0.72f),
-                            color = AuraNeonLime
+                            color = Color(0xFF68DFFF)
                         )
                     }
                 }
@@ -3555,7 +3563,7 @@ private fun QueueSheetContent(
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = currentTrack.title,
-                    color = AuraNeonLime,
+                    color = Color(0xFF68DFFF),
                     style = MaterialTheme.typography.titleSmall,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
@@ -3573,20 +3581,20 @@ private fun QueueSheetContent(
             Row(
                 modifier = Modifier
                     .clip(RoundedCornerShape(12.dp))
-                    .background(AuraNeonLime.copy(alpha = 0.15f))
+                    .background(Color(0xFF68DFFF).copy(alpha = 0.15f))
                     .padding(horizontal = 8.dp, vertical = 3.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Icon(
                     imageVector = Icons.Rounded.PlayArrow,
                     contentDescription = null,
-                    tint = AuraNeonLime,
+                    tint = Color(0xFF68DFFF),
                     modifier = Modifier.size(12.dp)
                 )
                 Spacer(modifier = Modifier.width(3.dp))
                 Text(
                     text = "Playing",
-                    color = AuraNeonLime,
+                    color = Color(0xFF68DFFF),
                     fontSize = 10.5.sp,
                     fontWeight = FontWeight.ExtraBold
                 )
@@ -3736,7 +3744,7 @@ private fun QueueSheetContent(
                                 Text(
                                     text = item.title,
                                     fontWeight = FontWeight.SemiBold,
-                                    color = if (isDraggingThis) AuraNeonLime else Color.White,
+                                    color = if (isDraggingThis) Color(0xFF68DFFF) else Color.White,
                                     fontSize = 13.5.sp,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
@@ -3772,7 +3780,7 @@ private fun QueueSheetContent(
                                 Icon(
                                     imageVector = Icons.Rounded.DragHandle,
                                     contentDescription = "Drag to reorder",
-                                    tint = if (isDraggingThis) AuraNeonLime else Color.White.copy(alpha = 0.45f),
+                                    tint = if (isDraggingThis) Color(0xFF68DFFF) else Color.White.copy(alpha = 0.45f),
                                     modifier = Modifier.size(22.dp)
                                 )
                             }

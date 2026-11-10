@@ -84,7 +84,6 @@ import com.auramusic.app.ui.components.ArtistCarouselSkeleton
 import com.auramusic.app.ui.components.TrackItemSkeleton
 import com.auramusic.app.ui.components.auraShimmer
 import com.auramusic.app.ui.theme.AuraNeonLime
-import com.auramusic.app.ui.theme.SpotifyPitchBlack
 import com.auramusic.app.ui.theme.TextPrimary
 import com.auramusic.app.ui.theme.TextSecondary
 
@@ -117,7 +116,7 @@ fun ArtistDetailScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(SpotifyPitchBlack)
+            .background(Color(0xFF080A12))
     ) {
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
@@ -129,7 +128,7 @@ fun ArtistDetailScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(430.dp)
-                        .background(Color(0xFF161820))
+                        .background(Color(0xFF0B0D16))
                 ) {
                     if (artistDetail.bannerUrl.isNotBlank()) {
                         AsyncImage(
@@ -161,7 +160,7 @@ fun ArtistDetailScreen(
                                         Color.Black.copy(alpha = 0.30f),
                                         Color.Transparent,
                                         Color.Black.copy(alpha = 0.65f),
-                                        SpotifyPitchBlack
+                                        Color(0xFF080A12)
                                     )
                                 )
                             )
@@ -205,7 +204,7 @@ fun ArtistDetailScreen(
                         if (artistDetail.subscribers.isNotBlank()) {
                             Text(
                                 text = artistDetail.subscribers,
-                                color = AuraNeonLime,
+                                color = Color(0xFF68DFFF),
                                 fontWeight = FontWeight.SemiBold,
                                 fontSize = 13.sp,
                                 textAlign = TextAlign.End
@@ -274,8 +273,8 @@ fun ArtistDetailScreen(
                     ) {
                         Surface(
                             shape = RoundedCornerShape(20.dp),
-                            color = Color(0xFF1E2028),
-                            border = BorderStroke(1.dp, Color(0xFF2E323D)),
+                            color = Color(0xFF202637),
+                            border = BorderStroke(1.dp, Color(0x4068DFFF)),
                             modifier = Modifier
                                 .clip(RoundedCornerShape(20.dp))
                                 .clickable { isExpandedSongs = !isExpandedSongs }
@@ -359,7 +358,7 @@ fun ArtistDetailScreen(
                                                 modifier = Modifier
                                                     .size(96.dp)
                                                     .clip(CircleShape)
-                                                    .background(Color(0xFF1E2028))
+                                                    .background(Color(0xFF202637))
                                             ) {
                                                 AsyncImage(
                                                     model = item.highResArtworkUrl,
@@ -407,7 +406,7 @@ fun ArtistDetailScreen(
                                                     .width(192.dp)
                                                     .height(108.dp)
                                                     .clip(RoundedCornerShape(12.dp))
-                                                    .background(Color(0xFF1E2028))
+                                                    .background(Color(0xFF202637))
                                             ) {
                                                 AsyncImage(
                                                     model = item.highResArtworkUrl,
@@ -426,7 +425,7 @@ fun ArtistDetailScreen(
                                                     Icon(
                                                         imageVector = Icons.Rounded.PlayArrow,
                                                         contentDescription = "Play",
-                                                        tint = AuraNeonLime,
+                                                        tint = Color(0xFF68DFFF),
                                                         modifier = Modifier
                                                             .padding(6.dp)
                                                             .fillMaxSize()
@@ -467,7 +466,7 @@ fun ArtistDetailScreen(
                                                 modifier = Modifier
                                                     .size(130.dp)
                                                     .clip(RoundedCornerShape(12.dp))
-                                                    .background(Color(0xFF1E2028))
+                                                    .background(Color(0xFF202637))
                                             ) {
                                                 AsyncImage(
                                                     model = item.highResArtworkUrl,
@@ -490,7 +489,7 @@ fun ArtistDetailScreen(
                                                     ) {
                                                         Text(
                                                             text = badge,
-                                                            color = AuraNeonLime,
+                                                            color = Color(0xFF68DFFF),
                                                             fontSize = 9.5.sp,
                                                             fontWeight = FontWeight.Bold,
                                                             modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
@@ -576,7 +575,7 @@ fun ArtistDetailScreen(
                                         modifier = Modifier
                                             .size(130.dp)
                                             .clip(RoundedCornerShape(12.dp))
-                                            .background(Color(0xFF1E2028))
+                                            .background(Color(0xFF202637))
                                     ) {
                                         AsyncImage(
                                             model = album.highResArtworkUrl,
@@ -591,7 +590,7 @@ fun ArtistDetailScreen(
                                         ) {
                                             Text(
                                                 text = album.type,
-                                                color = AuraNeonLime,
+                                                color = Color(0xFF68DFFF),
                                                 fontSize = 9.5.sp,
                                                 fontWeight = FontWeight.Bold,
                                                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
@@ -778,7 +777,7 @@ private fun ArtistPopularSongRow(
         // Ranking number 1-10
         Text(
             text = "$rank",
-            color = if (isCurrent) AuraNeonLime else TextSecondary,
+            color = if (isCurrent) Color(0xFF68DFFF) else TextSecondary,
             fontWeight = FontWeight.Bold,
             fontSize = 14.sp,
             textAlign = TextAlign.Center,
@@ -803,7 +802,7 @@ private fun ArtistPopularSongRow(
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = track.title,
-                color = if (isCurrent) AuraNeonLime else Color.White,
+                color = if (isCurrent) Color(0xFF68DFFF) else Color.White,
                 fontWeight = FontWeight.SemiBold,
                 fontSize = 14.sp,
                 maxLines = 1,

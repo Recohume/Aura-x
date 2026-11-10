@@ -91,7 +91,6 @@ import com.auramusic.app.ui.components.TrackItemSkeleton
 import com.auramusic.app.ui.theme.AuraNeonLime
 import com.auramusic.app.ui.theme.AuraPillInactive
 import com.auramusic.app.ui.theme.AuraPillInactiveText
-import com.auramusic.app.ui.theme.SpotifyPitchBlack
 import com.auramusic.app.ui.theme.TextPrimary
 import com.auramusic.app.ui.theme.TextSecondary
 
@@ -195,7 +194,7 @@ fun SearchScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(SpotifyPitchBlack)
+            .background(Color(0xFF080A12))
     ) {
         if (!showActiveSearch) {
             // =========================================================================
@@ -750,7 +749,7 @@ private fun DedicatedSearchingView(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(SpotifyPitchBlack)
+            .background(Color(0xFF080A12))
     ) {
         // =========================================================================
         // PINNED HEADER: Back Button + Search Box + Pinned Filter Pills
@@ -758,7 +757,7 @@ private fun DedicatedSearchingView(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(Color(0xFF14151B))
+                .background(Color(0xFF171B2A))
                 .statusBarsPadding()
                 .padding(top = 4.dp, bottom = 8.dp)
         ) {
@@ -818,7 +817,7 @@ private fun DedicatedSearchingView(
                                     color = Color.White,
                                     fontSize = 14.sp
                                 ),
-                                cursorBrush = SolidColor(AuraNeonLime),
+                                cursorBrush = SolidColor(Color(0xFF68DFFF)),
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .focusRequester(focusRequester)
@@ -833,7 +832,7 @@ private fun DedicatedSearchingView(
                                 Icon(
                                     imageVector = Icons.Rounded.Clear,
                                     contentDescription = "Clear search",
-                                    tint = Color(0xFFB0B4C0),
+                                    tint = Color(0xFF68DFFF),
                                     modifier = Modifier.size(18.dp)
                                 )
                             }
@@ -864,7 +863,7 @@ private fun DedicatedSearchingView(
                     val isSelected = filter == key
                     Surface(
                         shape = RoundedCornerShape(16.dp),
-                        color = if (isSelected) AuraNeonLime else Color(0xFF262832),
+                        color = if (isSelected) Color(0xFF68DFFF) else Color(0xFF171B2A),
                         modifier = Modifier
                             .clip(RoundedCornerShape(16.dp))
                             .clickable {
@@ -1101,7 +1100,7 @@ private fun RecentPlayedTrackRow(
             modifier = Modifier
                 .size(52.dp)
                 .clip(RoundedCornerShape(8.dp))
-                .background(Color(0xFF202127)),
+                .background(Color(0xFF171B2A)),
             contentAlignment = Alignment.Center
         ) {
             AsyncImage(
@@ -1119,7 +1118,7 @@ private fun RecentPlayedTrackRow(
                 ) {
                     AudioPlayingIndicator(
                         modifier = Modifier.fillMaxSize(0.70f),
-                        color = AuraNeonLime
+                        color = Color(0xFF68DFFF)
                     )
                 }
             }
@@ -1159,7 +1158,7 @@ private fun RecentPlayedTrackRow(
             Icon(
                 imageVector = if (isFavorite) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
                 contentDescription = if (isFavorite) "Unlike" else "Like",
-                tint = if (isFavorite) AuraNeonLime else Color(0xFFA0A5B5),
+                tint = if (isFavorite) Color(0xFF68DFFF) else Color(0xFFA0A5B5),
                 modifier = Modifier.size(20.dp)
             )
         }
@@ -1222,7 +1221,7 @@ private fun ArtistSearchResultHeader(
                 Icon(
                     imageVector = Icons.Rounded.CheckCircle,
                     contentDescription = "Verified Artist",
-                    tint = AuraNeonLime,
+                    tint = Color(0xFF68DFFF),
                     modifier = Modifier.size(16.dp)
                 )
             }
@@ -1357,7 +1356,7 @@ private fun SearchResultPlaylistTile(
             Icon(
                 imageVector = if (isSaved) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
                 contentDescription = if (isSaved) "Liked playlist" else "Like playlist",
-                tint = if (isSaved) AuraNeonLime else TextSecondary,
+                tint = if (isSaved) Color(0xFF68DFFF) else TextSecondary,
                 modifier = Modifier.size(20.dp)
             )
         }
@@ -1408,7 +1407,7 @@ private fun SearchResultSongTile(
             modifier = Modifier
                 .size(52.dp)
                 .clip(RoundedCornerShape(8.dp))
-                .background(Color(0xFF202127)),
+                .background(Color(0xFF171B2A)),
             contentAlignment = Alignment.Center
         ) {
             AsyncImage(
@@ -1426,7 +1425,7 @@ private fun SearchResultSongTile(
                 ) {
                     AudioPlayingIndicator(
                         modifier = Modifier.fillMaxSize(0.70f),
-                        color = AuraNeonLime
+                        color = Color(0xFF68DFFF)
                     )
                 }
             }
@@ -1441,7 +1440,7 @@ private fun SearchResultSongTile(
                 text = track.title,
                 fontSize = 14.5.sp,
                 fontWeight = FontWeight.Bold,
-                color = if (isCurrent) AuraNeonLime else Color.White,
+                color = if (isCurrent) Color(0xFF68DFFF) else Color.White,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
@@ -1480,7 +1479,7 @@ private fun SearchResultSongTile(
             Icon(
                 imageVector = if (isFavorite) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
                 contentDescription = if (isFavorite) "Unlike" else "Like",
-                tint = if (isFavorite) AuraNeonLime else Color(0xFFA0A5B5),
+                tint = if (isFavorite) Color(0xFF68DFFF) else Color(0xFFA0A5B5),
                 modifier = Modifier.size(20.dp)
             )
         }

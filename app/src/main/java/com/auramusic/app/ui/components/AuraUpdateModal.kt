@@ -78,7 +78,7 @@ import java.util.TimeZone
 private val FluidEasing = CubicBezierEasing(0.23f, 1f, 0.32f, 1f)
 private val DarkCanvasBg = Color(0xFF000000)
 private val CardSurfaceBg = Color(0xFF16181F)
-private val AuraLime = AuraNeonLime // Official AURA Neon Lime (#D4F644)
+private val AuraLime = Color(0xFF68DFFF) // Official AURA Neon Lime (#68DFFF)
 private val SecondaryText = Color(0xFF9E9E9E)
 private val LightButtonBg = Color(0xFFF0F1F4)
 private val DarkButtonText = Color(0xFF111215)
@@ -165,7 +165,7 @@ fun AuraUpdateModal(
             ) {
                 // Circled App Icon from assets/icon.png directly matching APK round icon
                 Image(
-                    painter = painterResource(id = R.drawable.aura_app_icon_round),
+                    painter = painterResource(id = R.drawable.ic_launcher_foreground),
                     contentDescription = "Aura App Icon",
                     contentScale = ContentScale.Fit,
                     modifier = Modifier
@@ -177,7 +177,7 @@ fun AuraUpdateModal(
 
                 // App Brand Name in official AURA Neon Lime
                 Text(
-                    text = "Aura",
+                    text = "AURA X",
                     fontSize = 14.5.sp,
                     fontWeight = FontWeight.Bold,
                     color = AuraLime

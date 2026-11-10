@@ -1,5 +1,6 @@
 package com.auramusic.app.ui.screens
 
+import com.auramusic.app.BuildConfig
 import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
@@ -81,7 +82,6 @@ import com.auramusic.app.domain.model.NowPlayingStyle
 import com.auramusic.app.ui.AuraViewModel
 import com.auramusic.app.ui.components.EqualizerWaveSection
 import com.auramusic.app.ui.theme.AuraNeonLime
-import com.auramusic.app.ui.theme.SpotifyPitchBlack
 import com.auramusic.app.ui.theme.TextPrimary
 import com.auramusic.app.ui.theme.TextSecondary
 import java.io.File
@@ -175,7 +175,7 @@ fun SettingsScreen(viewModel: AuraViewModel) {
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .background(SpotifyPitchBlack),
+            .background(Color(0xFF080A12)),
         contentPadding = PaddingValues(start = 22.dp, end = 22.dp, top = 16.dp, bottom = 140.dp)
     ) {
         // 1. Header
@@ -419,7 +419,7 @@ fun SettingsScreen(viewModel: AuraViewModel) {
                     }
                     Text(
                         text = "${crossfadeSeconds}s",
-                        color = AuraNeonLime,
+                        color = Color(0xFF68DFFF),
                         fontWeight = FontWeight.Bold,
                         fontSize = 13.sp
                     )
@@ -431,8 +431,8 @@ fun SettingsScreen(viewModel: AuraViewModel) {
                     valueRange = 0f..12f,
                     steps = 11,
                     colors = SliderDefaults.colors(
-                        thumbColor = AuraNeonLime,
-                        activeTrackColor = AuraNeonLime,
+                        thumbColor = Color(0xFF68DFFF),
+                        activeTrackColor = Color(0xFF68DFFF),
                         inactiveTrackColor = Color(0xFF262933)
                     ),
                     modifier = Modifier
@@ -562,36 +562,93 @@ fun SettingsScreen(viewModel: AuraViewModel) {
 
         // 8. About Aura
         item {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
+    val creatorUriHandler = androidx.compose.ui.platform.LocalUriHandler.current
+
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(20.dp),
+        color = Color(0xFF171B2A),
+        border = androidx.compose.foundation.BorderStroke(
+            1.dp, Color(0xFF68DFFF).copy(alpha = 0.35f)
+        )
+    ) {
+        Column(modifier = Modifier.padding(18.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
                 Image(
-                    painter = painterResource(id = R.drawable.aura_logo),
-                    contentDescription = "Aura Logo",
-                    modifier = Modifier
-                        .size(42.dp)
-                        .clip(CircleShape)
+                    painter = painterResource(id = R.drawable.ic_launcher_foreground),
+                    contentDescription = "AURA X Logo",
+                    modifier = Modifier.size(52.dp)
                 )
-                Spacer(modifier = Modifier.width(14.dp))
+                Spacer(modifier = Modifier.width(12.dp))
                 Column {
                     Text(
-                        text = "Aura v$appVersionName",
+                        text = "AURA X",
                         color = Color.White,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 15.sp
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold
                     )
-                    Spacer(modifier = Modifier.height(2.dp))
                     Text(
-                        text = "SimpMusic & YouTube Music Engine • 0% AI Slop",
-                        color = TextSecondary,
+                        text = "Created with passion",
+                        color = Color(0xFF68DFFF),
                         fontSize = 12.sp
                     )
                 }
             }
+
+            Spacer(modifier = Modifier.height(18.dp))
+            Text(
+                text = "CREATOR",
+                color = Color(0xFF68DFFF),
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(modifier = Modifier.height(5.dp))
+            Text(
+                text = "Vishal Kumar",
+                color = Color.White,
+                fontSize = 17.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+            Spacer(modifier = Modifier.height(14.dp))
+
+            Text(
+                text = "Instagram  ·  @Vishalvk4u",
+                color = Color.White,
+                fontSize = 14.sp,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { creatorUriHandler.openUri("https://instagram.com/Vishalvk4u") }
+                    .padding(vertical = 9.dp)
+            )
+            Text(
+                text = "Telegram  ·  @Anjali_Sharma4u",
+                color = Color.White,
+                fontSize = 14.sp,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { creatorUriHandler.openUri("https://t.me/Anjali_Sharma4u") }
+                    .padding(vertical = 9.dp)
+            )
+            Text(
+                text = "Email  ·  rexpatel350@gmail.com",
+                color = Color.White,
+                fontSize = 14.sp,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { creatorUriHandler.openUri("mailto:rexpatel350@gmail.com") }
+                    .padding(vertical = 9.dp)
+            )
+            Spacer(modifier = Modifier.height(10.dp))
+            Text(
+                text = "AURA X  •  Version " + BuildConfig.VERSION_NAME,
+                color = Color(0xFF9AA3B8),
+                fontSize = 11.sp
+            )
         }
+    }
+}
     }
 
     // --- DIALOGS ---
@@ -625,14 +682,14 @@ fun SettingsScreen(viewModel: AuraViewModel) {
                                     showAudioQualityDialog = false
                                 },
                                 colors = RadioButtonDefaults.colors(
-                                    selectedColor = AuraNeonLime,
+                                    selectedColor = Color(0xFF68DFFF),
                                     unselectedColor = TextSecondary
                                 )
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
                                 text = label,
-                                color = if (isSelected) AuraNeonLime else Color.White,
+                                color = if (isSelected) Color(0xFF68DFFF) else Color.White,
                                 fontSize = 13.5.sp,
                                 fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
                             )
@@ -679,14 +736,14 @@ fun SettingsScreen(viewModel: AuraViewModel) {
                                     showVideoQualityDialog = false
                                 },
                                 colors = RadioButtonDefaults.colors(
-                                    selectedColor = AuraNeonLime,
+                                    selectedColor = Color(0xFF68DFFF),
                                     unselectedColor = TextSecondary
                                 )
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
                                 text = label,
-                                color = if (isSelected) AuraNeonLime else Color.White,
+                                color = if (isSelected) Color(0xFF68DFFF) else Color.White,
                                 fontSize = 13.5.sp,
                                 fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
                             )
@@ -728,7 +785,7 @@ fun SettingsScreen(viewModel: AuraViewModel) {
                                 checked = isChecked,
                                 onCheckedChange = { viewModel.toggleRomanizationLanguage(key) },
                                 colors = CheckboxDefaults.colors(
-                                    checkedColor = AuraNeonLime,
+                                    checkedColor = Color(0xFF68DFFF),
                                     checkmarkColor = Color.Black,
                                     uncheckedColor = TextSecondary
                                 )
@@ -746,7 +803,7 @@ fun SettingsScreen(viewModel: AuraViewModel) {
             },
             confirmButton = {
                 TextButton(onClick = { showRomanizationDialog = false }) {
-                    Text("Done", color = AuraNeonLime, fontWeight = FontWeight.Bold)
+                    Text("Done", color = Color(0xFF68DFFF), fontWeight = FontWeight.Bold)
                 }
             },
             containerColor = Color(0xFF181A22),
@@ -783,14 +840,14 @@ fun SettingsScreen(viewModel: AuraViewModel) {
                                     showCacheLimitDialog = false
                                 },
                                 colors = RadioButtonDefaults.colors(
-                                    selectedColor = AuraNeonLime,
+                                    selectedColor = Color(0xFF68DFFF),
                                     unselectedColor = TextSecondary
                                 )
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
                                 text = label,
-                                color = if (isSelected) AuraNeonLime else Color.White,
+                                color = if (isSelected) Color(0xFF68DFFF) else Color.White,
                                 fontSize = 13.5.sp,
                                 fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
                             )
@@ -851,13 +908,13 @@ private fun ModernSettingsRow(
                 modifier = Modifier
                     .size(36.dp)
                     .clip(CircleShape)
-                    .background(Color.White.copy(alpha = 0.05f)),
+                    .background(Color(0xFF202637)),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
                     imageVector = icon,
                     contentDescription = null,
-                    tint = Color.White.copy(alpha = 0.85f),
+                    tint = Color(0xFF68DFFF),
                     modifier = Modifier.size(18.dp)
                 )
             }
@@ -905,13 +962,13 @@ private fun ModernClickableRow(
                 modifier = Modifier
                     .size(36.dp)
                     .clip(CircleShape)
-                    .background(Color.White.copy(alpha = 0.05f)),
+                    .background(Color(0xFF202637)),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
                     imageVector = icon,
                     contentDescription = null,
-                    tint = Color.White.copy(alpha = 0.85f),
+                    tint = Color(0xFF68DFFF),
                     modifier = Modifier.size(18.dp)
                 )
             }
@@ -987,7 +1044,7 @@ private fun ModernSwitchRow(
             onCheckedChange = onCheckedChange,
             colors = SwitchDefaults.colors(
                 checkedThumbColor = Color.Black,
-                checkedTrackColor = AuraNeonLime,
+                checkedTrackColor = Color(0xFF68DFFF),
                 uncheckedThumbColor = Color.White.copy(alpha = 0.8f),
                 uncheckedTrackColor = Color.White.copy(alpha = 0.15f)
             )

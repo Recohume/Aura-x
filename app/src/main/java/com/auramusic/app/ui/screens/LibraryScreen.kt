@@ -108,9 +108,8 @@ import com.auramusic.app.ui.theme.AuraCircleButtonBg
 import com.auramusic.app.ui.theme.AuraNeonLime
 import com.auramusic.app.ui.theme.AuraPillInactive
 import com.auramusic.app.ui.theme.AuraPillInactiveText
-import com.auramusic.app.ui.theme.AuraPlayGreen
+import com.auramusic.app.ui.theme.AuraNeonLime
 import com.auramusic.app.ui.theme.SpotifyCard
-import com.auramusic.app.ui.theme.SpotifyPitchBlack
 import com.auramusic.app.ui.theme.TextPrimary
 import com.auramusic.app.ui.theme.TextSecondary
 
@@ -244,7 +243,7 @@ fun LibraryScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(SpotifyPitchBlack)
+            .background(Color(0xFF080A12))
             .padding(top = 2.dp)
     ) {
         // Top Bar: "My Music" + Flat Options Button (no arrow back, no circle fill container)
@@ -310,7 +309,7 @@ fun LibraryScreen(
                         Icon(
                             imageVector = Icons.Rounded.Link,
                             contentDescription = null,
-                            tint = AuraNeonLime,
+                            tint = Color(0xFF68DFFF),
                             modifier = Modifier.size(18.dp)
                         )
                         Spacer(modifier = Modifier.width(8.dp))
@@ -388,7 +387,7 @@ fun LibraryScreen(
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     if (isImporting) {
                                         CircularProgressIndicator(
-                                            color = AuraNeonLime,
+                                            color = Color(0xFF68DFFF),
                                             strokeWidth = 2.dp,
                                             modifier = Modifier.size(13.dp)
                                         )
@@ -399,7 +398,7 @@ fun LibraryScreen(
                                         color = if (spotifyImportStatus.contains("Could not", true) || spotifyImportStatus.contains("Failed", true))
                                             Color(0xFFFF5252)
                                         else
-                                            AuraNeonLime,
+                                            Color(0xFF68DFFF),
                                         fontSize = 11.5.sp,
                                         fontWeight = FontWeight.Medium,
                                         maxLines = 1,
@@ -420,7 +419,7 @@ fun LibraryScreen(
                             enabled = linkInput.isNotBlank() && !isImporting,
                             shape = RoundedCornerShape(8.dp),
                             colors = ButtonDefaults.buttonColors(
-                                containerColor = AuraNeonLime,
+                                containerColor = Color(0xFF68DFFF),
                                 disabledContainerColor = Color(0xFF222530)
                             ),
                             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
@@ -467,7 +466,7 @@ fun LibraryScreen(
                 val label = tabLabels[idx]
                 Surface(
                     shape = CircleShape,
-                    color = if (selected) AuraNeonLime else AuraPillInactive,
+                    color = if (selected) Color(0xFF68DFFF) else AuraPillInactive,
                     modifier = Modifier
                         .clip(CircleShape)
                         .clickable { activeTab = idx }
@@ -698,7 +697,7 @@ fun LibraryScreen(
         val target = renamePlaylistTarget!!
         AlertDialog(
             onDismissRequest = { showRenameDialog = false },
-            containerColor = Color(0xFF1B1D26),
+            containerColor = Color(0xFF171B2A),
             title = { Text("Rename Playlist", color = Color.White, fontWeight = FontWeight.Bold) },
             text = {
                 OutlinedTextField(
@@ -706,7 +705,7 @@ fun LibraryScreen(
                     onValueChange = { renameInput = it },
                     singleLine = true,
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = AuraNeonLime,
+                        focusedBorderColor = Color(0xFF68DFFF),
                         unfocusedBorderColor = Color.White.copy(alpha = 0.2f),
                         focusedTextColor = Color.White,
                         unfocusedTextColor = Color.White
@@ -724,7 +723,7 @@ fun LibraryScreen(
                         showRenameDialog = false
                     }
                 ) {
-                    Text("Save", color = AuraNeonLime, fontWeight = FontWeight.Bold)
+                    Text("Save", color = Color(0xFF68DFFF), fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
@@ -793,7 +792,7 @@ private fun LibraryOverviewTile(
     Box(
         modifier = modifier
             .clip(RoundedCornerShape(20.dp))
-            .background(Color(0xFF24272D))
+            .background(Color(0xFF171B2A))
             .clickable(onClick = onClick)
             .padding(14.dp)
     ) {

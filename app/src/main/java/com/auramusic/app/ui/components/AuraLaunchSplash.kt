@@ -83,8 +83,8 @@ fun AuraLaunchSplash(
             // At progress = 0: tucked below/left outside the circle clip
             // At progress = 1: perfectly in rest position matching Candidate A1 app icon
             Image(
-                painter = painterResource(id = R.drawable.aura_bunny_mascot),
-                contentDescription = "Aura Bunny Mascot",
+                painter = painterResource(id = R.drawable.ic_launcher_foreground),
+                contentDescription = "AURA X Glass Logo",
                 modifier = Modifier
                     .fillMaxSize()
                     .graphicsLayer {

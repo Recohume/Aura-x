@@ -86,7 +86,7 @@ object AuraNotificationManager {
             ).apply {
                 description = "Notifies you when new updates or features are released"
                 enableLights(true)
-                lightColor = 0xFFD4F644.toInt() // Aura Neon Lime
+                lightColor = 0xFF68DFFF.toInt() // Aura Neon Lime
                 enableVibration(true)
                 setShowBadge(true)
             }
@@ -246,7 +246,7 @@ object AuraNotificationManager {
             .setContentText(message)
             .setStyle(NotificationCompat.BigTextStyle().bigText(message))
             .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setColor(0xFFD4F644.toInt()) // Aura Neon Lime
+            .setColor(0xFF68DFFF.toInt()) // Aura Neon Lime
             .setAutoCancel(true)
             .setContentIntent(pendingIntent)
             .build()
@@ -259,13 +259,13 @@ object AuraNotificationManager {
     }
 
     /**
-     * Renders R.drawable.aura_app_icon_round (assets/icon.png) into a crisp circular Bitmap
+     * Renders R.drawable.ic_launcher_foreground (assets/icon.png) into a crisp circular Bitmap
      * for the right-side notification thumbnail (setLargeIcon) without BigPicture expansion.
      */
     private fun createCircularLogoBitmap(context: Context): Bitmap? {
         return try {
-            val raw = BitmapFactory.decodeResource(context.resources, R.drawable.aura_app_icon_round)
-                ?: BitmapFactory.decodeResource(context.resources, R.drawable.aura_logo)
+            val raw = BitmapFactory.decodeResource(context.resources, R.drawable.ic_launcher_foreground)
+                ?: BitmapFactory.decodeResource(context.resources, R.drawable.ic_launcher_foreground)
                 ?: return null
             val size = 256
             val scaled = Bitmap.createScaledBitmap(raw, size, size, true)

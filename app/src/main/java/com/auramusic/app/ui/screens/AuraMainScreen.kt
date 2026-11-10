@@ -33,6 +33,7 @@ import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.border
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -107,7 +108,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.auramusic.app.ui.components.AudioPlayingIndicator
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.lifecycle.Lifecycle
@@ -120,10 +120,8 @@ import com.auramusic.app.domain.model.AuraTrack
 import com.auramusic.app.ui.AuraViewModel
 import com.auramusic.app.ui.components.AuraUpdateModal
 import com.auramusic.app.ui.theme.AuraNeonLime
-import com.auramusic.app.ui.theme.AuraPlayGreen
 import com.auramusic.app.ui.theme.AuraViolet
 import com.auramusic.app.ui.theme.SpotifyCard
-import com.auramusic.app.ui.theme.SpotifyPitchBlack
 import com.auramusic.app.ui.theme.TextPrimary
 import com.auramusic.app.ui.theme.TextSecondary
 
@@ -332,7 +330,7 @@ fun AuraMainScreen(viewModel: AuraViewModel) {
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(SpotifyPitchBlack)
+            .background(Color(0xFF080A12))
     ) {
         // 1. Screens Content (full screen underneath floating controls) with directional slide transitions
         val saveableStateHolder = rememberSaveableStateHolder()
@@ -564,9 +562,9 @@ fun AuraMainScreen(viewModel: AuraViewModel) {
                     Brush.verticalGradient(
                         colors = listOf(
                             Color.Transparent,
-                            SpotifyPitchBlack.copy(alpha = 0.70f),
-                            SpotifyPitchBlack.copy(alpha = 0.95f),
-                            SpotifyPitchBlack
+                            Color(0xFF080A12).copy(alpha = 0.70f),
+                            Color(0xFF080A12).copy(alpha = 0.95f),
+                            Color(0xFF080A12)
                         )
                     )
                 )
@@ -964,9 +962,19 @@ private fun AuraMiniPlayer(
     }
 
     Surface(
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(20.dp),
         color = animatedBgColor.copy(alpha = 0.96f),
-        shadowElevation = 10.dp,
+        border = BorderStroke(
+            1.dp,
+            Brush.linearGradient(
+                colors = listOf(
+                    Color(0xFF68DFFF).copy(alpha = 0.65f),
+                    Color(0xFF927CFF).copy(alpha = 0.55f),
+                    Color(0xFF68DFFF).copy(alpha = 0.25f)
+                )
+            )
+        ),
+        shadowElevation = 14.dp,
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 20.dp)
@@ -993,6 +1001,7 @@ private fun AuraMiniPlayer(
                     modifier = Modifier
                         .size(42.dp)
                         .clip(RoundedCornerShape(8.dp))
+                    .border(1.dp, Color(0xFF68DFFF).copy(alpha = 0.42f), RoundedCornerShape(8.dp))
                         .onGloballyPositioned { onArtworkPositioned(it.boundsInRoot()) }
                         .graphicsLayer { alpha = if (hideArtworkForTransition) 0f else 1f },
                     contentAlignment = Alignment.Center
@@ -1084,15 +1093,15 @@ private fun AuraMiniPlayer(
                         Text(
                             text = track.title,
                             color = Color.White,
-                            style = MaterialTheme.typography.titleSmall,
+                            style = MaterialTheme.typography.titleMedium,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
                             text = track.artist,
-                            color = Color.White.copy(alpha = 0.75f),
-                            style = MaterialTheme.typography.bodySmall,
+                            color = Color(0xFF9BEAFF),
+                            style = MaterialTheme.typography.bodyMedium,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
@@ -1169,7 +1178,7 @@ private fun AuraMiniPlayer(
                         Icon(
                             imageVector = Icons.Rounded.SkipPrevious,
                             contentDescription = "Previous Track",
-                            tint = Color.White,
+                            tint = Color(0xFFB69CFF),
                             modifier = Modifier.size(22.dp)
                         )
                     }
@@ -1180,7 +1189,7 @@ private fun AuraMiniPlayer(
                         modifier = Modifier
                             .size(34.dp)
                             .clip(CircleShape)
-                            .background(lighterProgressColor)
+                            .background(Color(0xFF68DFFF))
                             .clickable(onClick = onTogglePlayPause),
                         contentAlignment = Alignment.Center
                     ) {
@@ -1194,7 +1203,7 @@ private fun AuraMiniPlayer(
                             Icon(
                                 imageVector = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
                                 contentDescription = if (isPlaying) "Pause" else "Play",
-                                tint = Color.Black,
+                                tint = Color(0xFF101018),
                                 modifier = Modifier
                                     .size(20.dp)
                                     .padding(start = if (!isPlaying) 1.5.dp else 0.dp)
@@ -1211,7 +1220,7 @@ private fun AuraMiniPlayer(
                         Icon(
                             imageVector = Icons.Rounded.SkipNext,
                             contentDescription = "Next Track",
-                            tint = Color.White,
+                            tint = Color(0xFFB69CFF),
                             modifier = Modifier.size(22.dp)
                         )
                     }
@@ -1220,11 +1229,11 @@ private fun AuraMiniPlayer(
 
             LinearProgressIndicator(
                 progress = { progress },
-                color = lighterProgressColor,
-                trackColor = animatedBgColor.copy(alpha = 0.35f),
+                color = Color(0xFF68DFFF),
+                trackColor = Color(0xFF68DFFF).copy(alpha = 0.25f),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(2.dp)
+                    .height(3.dp)
             )
         }
     }

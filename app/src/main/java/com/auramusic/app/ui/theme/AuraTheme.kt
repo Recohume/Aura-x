@@ -19,10 +19,10 @@ import kotlinx.coroutines.withContext
 import okhttp3.Request
 
 // Encore Modern Design Tokens (Bespoke Obsidian + Electric Lime + Pastel Lilac)
-val AuraNeonLime = Color(0xFFD4F644) // Electric Chartreuse / Neon Lime
-val AuraLilacCard = Color(0xFFD6C7FF) // Pastel Lavender / Lilac Hero Card
-val AuraLilacDarkText = Color(0xFF1D1438) // Deep Indigo text on Lilac card
-val AuraLilacButton = Color(0xFF261947) // Deep Violet Play button on Lilac card
+val AuraNeonLime = Color(0xFF68DFFF) // Electric Chartreuse / Neon Lime
+val AuraLilacCard = Color(0xFF29243F) // Pastel Lavender / Lilac Hero Card
+val AuraLilacDarkText = Color(0xFFF3F0FF) // Deep Indigo text on Lilac card
+val AuraLilacButton = Color(0xFF171322) // Deep Violet Play button on Lilac card
 val AuraObsidianBg = Color(0xFF121316) // Deep warm Obsidian charcoal background
 val AuraDarkSurface = Color(0xFF181A20) // Floating docks, surface containers
 val AuraCardDark = Color(0xFF1E2026) // Card containers & list items
@@ -37,12 +37,12 @@ val SpotifyCard = AuraCardDark
 val SpotifyCardElevated = Color(0xFF252731)
 val SpotifyHeroCard = AuraLilacCard
 
-val AuraSageGreen = Color(0xFFBCE354)
+val AuraSageGreen = Color(0xFF9BEAFF)
 val AuraPlayGreen = AuraNeonLime // Primary brand accent across player and controls
 val SpotifyGreen = AuraNeonLime
-val AuraViolet = Color(0xFF8B5CF6)
-val AuraMagenta = Color(0xFFEC4899)
-val AuraCyan = Color(0xFF06B6D4)
+val AuraViolet = Color(0xFF927CFF)
+val AuraMagenta = Color(0xFFB69CFF)
+val AuraCyan = Color(0xFF68DFFF)
 
 val PillActiveBg = AuraNeonLime // Active capsule filter pill
 val PillActiveText = Color(0xFF000000)

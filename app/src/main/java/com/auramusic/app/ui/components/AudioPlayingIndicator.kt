@@ -23,7 +23,7 @@ import com.auramusic.app.ui.theme.AuraNeonLime
  * - 6 bars grown from the vertical centre (centred at y=75 in a 200x150 comp).
  * - Positioned on a 12-unit pitch spanning x 70.8..130.9.
  * - 1.44s loop cycle (1,440ms) smoothly eased with cubic smoothstep (lerpSmooth).
- * - Default color: Aura's signature Lime (#D4F644 / AuraNeonLime).
+ * - Default color: Aura's signature Lime (#68DFFF / AuraNeonLime).
  */
 @Composable
 fun AudioPlayingIndicator(
@@ -81,7 +81,7 @@ private fun lerpSmooth(
     to: Float,
 ): Float = from + (to - from) * t * t * (3f - 2f * t)
 
-val AudioIndicatorLime = AuraNeonLime
+val AudioIndicatorLime = Color(0xFF68DFFF)
 val AudioIndicatorCyan = Color(0xFF05EBFF)
 
 private const val AUDIO_COMP_WIDTH = 200f

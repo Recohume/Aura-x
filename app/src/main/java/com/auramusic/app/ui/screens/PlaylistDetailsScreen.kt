@@ -81,9 +81,7 @@ import com.auramusic.app.domain.model.AuraTrack
 import com.auramusic.app.ui.components.AuraPlaylistCover
 import com.auramusic.app.ui.components.AuraPlaylistOptionsModal
 import com.auramusic.app.ui.components.AuraTrackOptionsModal
-import com.auramusic.app.ui.theme.AuraPlayGreen
-import com.auramusic.app.ui.theme.SpotifyCard
-import com.auramusic.app.ui.theme.SpotifyPitchBlack
+import com.auramusic.app.ui.theme.AuraNeonLime
 import com.auramusic.app.ui.theme.TextPrimary
 import com.auramusic.app.ui.theme.TextSecondary
 import java.io.File
@@ -167,7 +165,7 @@ fun PlaylistDetailsScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(SpotifyPitchBlack)
+            .background(Color(0xFF080A12))
     ) {
         // Top Navigation Bar
         Row(
@@ -222,7 +220,7 @@ fun PlaylistDetailsScreen(
                         modifier = Modifier
                             .size(210.dp)
                             .clip(RoundedCornerShape(16.dp))
-                            .background(SpotifyCard)
+                            .background(Color(0xFF202637))
                             .clickable { onPickCoverImage() },
                         contentAlignment = Alignment.Center
                     ) {
@@ -249,7 +247,7 @@ fun PlaylistDetailsScreen(
                                 Icon(
                                     imageVector = Icons.Rounded.Edit,
                                     contentDescription = "Edit Cover",
-                                    tint = AuraPlayGreen,
+                                    tint = Color(0xFF68DFFF),
                                     modifier = Modifier.size(13.dp)
                                 )
                                 Spacer(modifier = Modifier.width(4.dp))
@@ -292,7 +290,7 @@ fun PlaylistDetailsScreen(
                     ) {
                         Surface(
                             shape = RoundedCornerShape(14.dp),
-                            color = SpotifyCard,
+                            color = Color(0xFF202637),
                             modifier = Modifier
                                 .clip(RoundedCornerShape(14.dp))
                                 .clickable {
@@ -310,7 +308,7 @@ fun PlaylistDetailsScreen(
                                 Icon(
                                     imageVector = Icons.Rounded.Shuffle,
                                     contentDescription = "Shuffle",
-                                    tint = AuraPlayGreen,
+                                    tint = Color(0xFF68DFFF),
                                     modifier = Modifier.size(20.dp)
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
@@ -328,7 +326,7 @@ fun PlaylistDetailsScreen(
                             modifier = Modifier
                                 .size(56.dp)
                                 .clip(CircleShape)
-                                .background(AuraPlayGreen)
+                                .background(Color(0xFF68DFFF))
                                 .clickable {
                                     val contextualTracks = playlist.tracks.map { it.copy(album = playlist.name) }
                                     contextualTracks.firstOrNull()?.let { first ->
@@ -389,7 +387,7 @@ fun PlaylistDetailsScreen(
     if (showEditTitleDialog) {
         AlertDialog(
             onDismissRequest = { showEditTitleDialog = false },
-            containerColor = SpotifyCard,
+            containerColor = Color(0xFF202637),
             title = {
                 Text("Rename Playlist", color = TextPrimary, fontWeight = FontWeight.Bold)
             },
@@ -400,7 +398,7 @@ fun PlaylistDetailsScreen(
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = AuraPlayGreen,
+                        focusedBorderColor = Color(0xFF68DFFF),
                         unfocusedBorderColor = TextSecondary.copy(alpha = 0.3f),
                         focusedTextColor = TextPrimary,
                         unfocusedTextColor = TextPrimary
@@ -416,7 +414,7 @@ fun PlaylistDetailsScreen(
                         showEditTitleDialog = false
                     }
                 ) {
-                    Text("Save", color = AuraPlayGreen, fontWeight = FontWeight.Bold)
+                    Text("Save", color = Color(0xFF68DFFF), fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {

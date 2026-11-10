@@ -1,5 +1,9 @@
 package com.auramusic.app.ui.screens
 
+import com.auramusic.app.ui.theme.AuraViolet
+
+import com.auramusic.app.R
+
 import android.widget.Toast
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -25,6 +29,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -97,6 +102,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
@@ -128,7 +134,6 @@ import com.auramusic.app.ui.theme.AuraLilacDarkText
 import com.auramusic.app.ui.theme.AuraNeonLime
 import com.auramusic.app.ui.theme.AuraPillInactive
 import com.auramusic.app.ui.theme.AuraPillInactiveText
-import com.auramusic.app.ui.theme.AuraPlayGreen
 import com.auramusic.app.ui.theme.AuraSageGreen
 import com.auramusic.app.ui.theme.BadgeExplicitBg
 import com.auramusic.app.ui.theme.BadgeLyricsBg
@@ -138,7 +143,6 @@ import com.auramusic.app.ui.theme.PillInactiveBg
 import com.auramusic.app.ui.theme.PillInactiveText
 import com.auramusic.app.ui.theme.SpotifyCard
 import com.auramusic.app.ui.theme.SpotifyHeroCard
-import com.auramusic.app.ui.theme.SpotifyPitchBlack
 import com.auramusic.app.ui.theme.TextPrimary
 import com.auramusic.app.ui.theme.TextSecondary
 import java.util.Calendar
@@ -262,9 +266,11 @@ fun HomeScreen(
     val greetingSpacingDp = 8.dp
     val moodPillsHeightDp = 42.dp
     val headerBottomPaddingDp = 10.dp
+    val brandRowHeightDp = 40.dp
+    val brandRowSpacingDp = 8.dp
 
-    val collapseRangeDp = greetingHeightDp + greetingSpacingDp // 44.dp
-    val uncollapsedHeaderHeight = statusBarTop + greetingHeightDp + greetingSpacingDp + moodPillsHeightDp + headerBottomPaddingDp
+    val collapseRangeDp = brandRowHeightDp + brandRowSpacingDp + greetingHeightDp + greetingSpacingDp
+    val uncollapsedHeaderHeight = statusBarTop + brandRowHeightDp + brandRowSpacingDp + greetingHeightDp + greetingSpacingDp + moodPillsHeightDp + headerBottomPaddingDp
     val collapsedHeaderHeight = statusBarTop + moodPillsHeightDp + headerBottomPaddingDp
 
     val uncollapsedHeaderHeightPx = with(LocalDensity.current) { uncollapsedHeaderHeight.toPx() }
@@ -303,7 +309,7 @@ fun HomeScreen(
         },
         modifier = Modifier
             .fillMaxSize()
-            .background(SpotifyPitchBlack)
+            .background(Color(0xFF080A12))
     ) {
         Box(
             modifier = Modifier.fillMaxSize()
@@ -355,10 +361,10 @@ fun HomeScreen(
                                     Brush.verticalGradient(
                                         0.00f to Color.Transparent,
                                         0.56f to Color.Transparent,
-                                        0.72f to SpotifyPitchBlack.copy(alpha = 0.48f),
-                                        0.88f to SpotifyPitchBlack.copy(alpha = 0.88f),
-                                        0.97f to SpotifyPitchBlack,
-                                        1.00f to SpotifyPitchBlack
+                                        0.72f to Color(0xFF080A12).copy(alpha = 0.48f),
+                                        0.88f to Color(0xFF080A12).copy(alpha = 0.88f),
+                                        0.97f to Color(0xFF080A12),
+                                        1.00f to Color(0xFF080A12)
                                     )
                                 )
                         )
@@ -444,6 +450,7 @@ fun HomeScreen(
                                                             .size(60.dp)
                                                             .clip(RoundedCornerShape(6.dp))
                                                             .background(Color(0xFF202127))
+                                .border(1.dp, Color(0xFF68DFFF).copy(alpha = 0.28f), RoundedCornerShape(6.dp))
                                                             .clickable { onPlayTrack(track, quickPickTracks) },
                                                         contentAlignment = Alignment.Center
                                                     ) {
@@ -584,6 +591,7 @@ fun HomeScreen(
                                         .aspectRatio(16f / 9f)
                                         .clip(RoundedCornerShape(6.dp))
                                         .background(Color(0xFF202127))
+                    .border(1.dp, Color(0xFF68DFFF).copy(alpha = 0.25f), RoundedCornerShape(6.dp))
                                         .clickable { onPlayMusicVideo(video, videosForState) }
                                 ) {
                                     AsyncImage(
@@ -1159,10 +1167,39 @@ fun HomeScreen(
                     .align(Alignment.TopCenter)
                     .fillMaxWidth()
                     .height(effectiveHeaderHeight)
-                    .background(SpotifyPitchBlack.copy(alpha = headerBgAlpha))
+                    .background(Color(0xFF080A12).copy(alpha = headerBgAlpha))
                     .scrollable(state = listState, orientation = Orientation.Vertical)
             ) {
-                // Greeting text: full unclipped height, smoothly scrolls up into transparent status bar
+                // AURA X branding row
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .fillMaxWidth()
+                    .padding(top = statusBarTop + 8.dp, start = 20.dp, end = 20.dp)
+                    .height(brandRowHeightDp)
+                    .graphicsLayer {
+                        alpha = if (isAllCategory) (1f - collapseProgress).coerceIn(0f, 1f) else 0f
+                    }
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxSize(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Image(
+                        painter = painterResource(id = R.drawable.ic_launcher_foreground),
+                        contentDescription = "AURA X logo",
+                        modifier = Modifier.size(36.dp)
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Text(
+                        text = "AURA X",
+                        color = Color.White,
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                }
+            }
+
+            // Greeting text: full unclipped height, smoothly scrolls up into transparent status bar
                 val greetingTranslationY = if (isAllCategory) -scrollOffsetPx else (-collapseProgress * collapseRangePx)
                 val greetingAlpha = if (isAllCategory) {
                     (1f - (scrollOffsetPx / uncollapsedHeaderHeightPx.coerceAtLeast(1f)) * 1.4f).coerceIn(0f, 1f)
@@ -1173,7 +1210,7 @@ fun HomeScreen(
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(top = statusBarTop, start = 20.dp, end = 20.dp)
+                            .padding(top = statusBarTop + brandRowHeightDp + brandRowSpacingDp, start = 20.dp, end = 20.dp)
                             .graphicsLayer {
                                 translationY = greetingTranslationY
                                 alpha = greetingAlpha
@@ -1233,7 +1270,7 @@ fun HomeScreen(
                     .align(Alignment.TopCenter)
                     .fillMaxWidth()
                     .height(statusBarTop)
-                    .background(SpotifyPitchBlack)
+                    .background(Color(0xFF080A12))
             )
         }
         }
@@ -1321,6 +1358,7 @@ private fun QuickAccessCard(
         modifier = modifier
             .height(56.dp)
             .clip(RoundedCornerShape(6.dp))
+            .border(BorderStroke(1.dp, Color(0x4068DFFF)), RoundedCornerShape(6.dp))
             .clickable(onClick = onClick)
     ) {
         Row(
@@ -1352,7 +1390,7 @@ private fun QuickAccessCard(
                     .padding(end = 8.dp)
                     .size(30.dp)
                     .clip(CircleShape)
-                    .background(AuraPlayGreen),
+                    .background(AuraNeonLime),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
@@ -1465,7 +1503,7 @@ private fun FeaturedReleaseHeroCard(
                         Icon(
                             imageVector = if (isFavorite) Icons.Rounded.CheckCircle else Icons.Rounded.CheckCircleOutline,
                             contentDescription = "In Library",
-                            tint = if (isFavorite) AuraPlayGreen else TextSecondary,
+                            tint = if (isFavorite) AuraNeonLime else TextSecondary,
                             modifier = Modifier.size(24.dp)
                         )
                     }
@@ -1477,7 +1515,7 @@ private fun FeaturedReleaseHeroCard(
                         Icon(
                             imageVector = Icons.Rounded.ArrowCircleDown,
                             contentDescription = "Download for offline",
-                            tint = if (isDownloaded) AuraPlayGreen else TextSecondary,
+                            tint = if (isDownloaded) AuraNeonLime else TextSecondary,
                             modifier = Modifier.size(24.dp)
                         )
                     }
@@ -1500,7 +1538,7 @@ private fun FeaturedReleaseHeroCard(
                     modifier = Modifier
                         .size(48.dp)
                         .clip(CircleShape)
-                        .background(AuraPlayGreen)
+                        .background(AuraNeonLime)
                         .clickable(onClick = onPlay),
                     contentAlignment = Alignment.Center
                 ) {
@@ -1874,9 +1912,9 @@ private fun AuraMoodCategoryPill(
 
     // Un-tapped pill fill: Gray (#353945) when sticky header is dark; translucent dark over mood image at resting state
     val unselectedFill = if (isHeaderDark) {
-        Color(0xFF353945) // Modern gray fill
+        Color(0xFF171B2A) // Modern gray fill
     } else {
-        if (hasMoodBackground) Color.Black.copy(alpha = 0.45f) else Color(0xFF353945)
+        if (hasMoodBackground) Color.Black.copy(alpha = 0.45f) else Color(0xFF171B2A)
     }
 
     val pillBgColor by animateColorAsState(
@@ -1914,6 +1952,7 @@ private fun AuraMoodCategoryPill(
             listOf(
                 Color.Transparent,
                 AuraNeonLime,
+                AuraViolet,
                 Color.White,
                 AuraNeonLime,
                 Color.Transparent
@@ -1962,7 +2001,7 @@ private fun AuraMoodCategoryPill(
             if (showLoadingBorder) {
                 CircularProgressIndicator(
                     modifier = Modifier.size(10.dp),
-                    color = Color.Black,
+                    color = AuraNeonLime,
                     strokeWidth = 1.5.dp
                 )
             }
