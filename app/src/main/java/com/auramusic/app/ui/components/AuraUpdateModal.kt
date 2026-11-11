@@ -107,6 +107,7 @@ fun AuraUpdateModal(
     onInstallNow: (AuraReleaseInfo) -> Unit
 ) {
     BackHandler(enabled = visible && updateState != UpdateState.DOWNLOADING) {
+        release?.let { onSnooze(it.version) }
         onDismiss()
     }
 
@@ -327,7 +328,10 @@ fun AuraUpdateModal(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     IconButton(
-                        onClick = onDismiss,
+                        onClick = {
+                    release?.let { onSnooze(it.version) }
+                    onDismiss()
+                },
                         enabled = updateState != UpdateState.DOWNLOADING,
                         modifier = Modifier.size(48.dp)
                     ) {
@@ -341,7 +345,7 @@ fun AuraUpdateModal(
 
                     IconButton(
                         onClick = {
-                            val targetUrl = release.htmlUrl.ifBlank { "https://github.com/jlfuertes14/Aura-Music" }
+                            val targetUrl = release.htmlUrl.ifBlank { "https://github.com/Recohume/Aura-x" }
                             val browserIntent = Intent(Intent.ACTION_VIEW, Uri.parse(targetUrl))
                             context.startActivity(browserIntent)
                         },
