@@ -93,31 +93,34 @@ jobs:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
-          if [ -f "keystore/release.keystore" ]; then
-            echo "Using committed permanent repository release keystore..."
-            cp keystore/release.keystore release.jks
-            echo "KEYSTORE_FILE=release.jks" >> $GITHUB_ENV
-            echo "KEY_ALIAS=auramusic" >> $GITHUB_ENV
-            echo "KEYSTORE_PASS=aurarelease2026" >> $GITHUB_ENV
-            echo "KEY_PASS=aurarelease2026" >> $GITHUB_ENV
-          elif [ -n "$KEYSTORE_BASE64" ]; then
-            echo "Using repository signing secret..."
-            echo "$KEYSTORE_BASE64" | base64 -d > release.jks
-            echo "KEYSTORE_FILE=release.jks" >> $GITHUB_ENV
-            echo "KEY_ALIAS=${KEY_ALIAS}" >> $GITHUB_ENV
-            echo "KEYSTORE_PASS=${KEYSTORE_PASSWORD}" >> $GITHUB_ENV
-            echo "KEY_PASS=${KEY_PASSWORD}" >> $GITHUB_ENV
-          else
-            echo "Generating release keystore for universal production APK signing..."
-            keytool -genkey -v -keystore release.jks -alias auramusic -keyalg RSA -keysize 2048 -validity 10000 \
-              -dname "CN=AURA Music, OU=Mobile Engineering, O=AURA, L=Global, S=Global, C=US" \
-              -storepass aurarelease2026 -keypass aurarelease2026
-            echo "KEYSTORE_FILE=release.jks" >> $GITHUB_ENV
-            echo "KEY_ALIAS=auramusic" >> $GITHUB_ENV
-            echo "KEYSTORE_PASS=aurarelease2026" >> $GITHUB_ENV
-            echo "KEY_PASS=aurarelease2026" >> $GITHUB_ENV
+          set -euo pipefail
+
+          if [[ -z "$KEYSTORE_BASE64" || -z "$KEY_ALIAS" || -z "$KEYSTORE_PASSWORD" || -z "$KEY_PASSWORD" ]]; then
+            echo "ERROR: Required release signing secrets are missing."
+            exit 1
           fi
 
+          echo "$KEYSTORE_BASE64" | base64 --decode > "$GITHUB_WORKSPACE/release.jks"
+
+          if [[ ! -s "$GITHUB_WORKSPACE/release.jks" ]]; then
+            echo "ERROR: Decoded keystore is empty."
+            exit 1
+          fi
+
+          keytool -list -keystore "$GITHUB_WORKSPACE/release.jks" \
+            -alias "$KEY_ALIAS" -storepass "$KEYSTORE_PASSWORD" >/dev/null
+
+          {
+            echo "KEYSTORE_FILE=$GITHUB_WORKSPACE/release.jks"
+            echo "KEYSTORE_PASS=$KEYSTORE_PASSWORD"
+            echo "KEY_PASS=$KEY_PASSWORD"
+            echo "AURA_KEYSTORE_PATH=$GITHUB_WORKSPACE/release.jks"
+            echo "AURA_STORE_PASSWORD=$KEYSTORE_PASSWORD"
+            echo "AURA_KEY_ALIAS=$KEY_ALIAS"
+            echo "AURA_KEY_PASSWORD=$KEY_PASSWORD"
+          } >> "$GITHUB_ENV"
+
+          echo "Verified release keystore and signing alias."
       - name: Setup google-services.json
         shell: bash
         env:

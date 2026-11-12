@@ -2541,7 +2541,7 @@ private fun SpotifyEncorePlayerView(
             Spacer(modifier = Modifier.height(20.dp))
 
             // Signature Spotify Synced Lyrics Card (Automatically uses scanned cover art color, no borders, covers 5 lines)
-            val coverColor = palette.primary
+            val coverColor = Color(0xFF111722)
 
             Surface(
                 shape = RoundedCornerShape(20.dp),
@@ -2901,7 +2901,8 @@ private fun FullScreenSongLyricsView(
     onAdjustLyricsOffset: (Int) -> Unit
 ) {
     val lines = lyrics?.syncedLines ?: emptyList()
-    val activeIdx = lines.indexOfLast { positionSec >= it.timeSec }.coerceAtLeast(0)
+    val effectiveSec = positionSec + (lyricsOffsetMs / 1000f)
+    val activeIdx = lines.indexOfLast { effectiveSec >= it.timeSec }.coerceAtLeast(0)
     // Pre-calculate initial index on frame 1 so the active line is already placed in the center immediately
     val initialIdx = remember { (activeIdx - 1).coerceAtLeast(0) }
     val listState = rememberLazyListState(initialFirstVisibleItemIndex = initialIdx)

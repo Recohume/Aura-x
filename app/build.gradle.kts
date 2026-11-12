@@ -17,9 +17,9 @@ android {
         // Dynamic version code & name: CI build run number or Gradle parameter with local defaults
         val ciVersionCode = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull()
         val propVersionCode = (project.findProperty("versionCode") as? String)?.toIntOrNull()
-        versionCode = propVersionCode ?: ciVersionCode ?: 25
+        versionCode = propVersionCode ?: ciVersionCode ?: 26
 
-        versionName = "1.5.0"
+        versionName = "1.5.2"
         val propVersionName = project.findProperty("versionName") as? String
         val envVersionName = System.getenv("APP_VERSION_NAME")
         if (propVersionName != null) {
@@ -61,12 +61,12 @@ android {
 
     signingConfigs {
         create("release") {
-            val keystoreFile = rootProject.file("keystore/release.keystore")
-            if (keystoreFile.exists()) {
-                storeFile = keystoreFile
-                storePassword = "aurarelease2026"
-                keyAlias = "auramusic"
-                keyPassword = "aurarelease2026"
+            val keystorePath = System.getenv("AURA_KEYSTORE_PATH")
+            if (!keystorePath.isNullOrBlank()) {
+                storeFile = file(keystorePath)
+                storePassword = System.getenv("AURA_STORE_PASSWORD") ?: ""
+                keyAlias = System.getenv("AURA_KEY_ALIAS") ?: ""
+                keyPassword = System.getenv("AURA_KEY_PASSWORD") ?: ""
             }
         }
     }
@@ -74,8 +74,8 @@ android {
     buildTypes {
         release {
             isMinifyEnabled = false
-            val keystoreFile = rootProject.file("keystore/release.keystore")
-            if (keystoreFile.exists()) {
+            val keystorePath = System.getenv("AURA_KEYSTORE_PATH")
+            if (!keystorePath.isNullOrBlank() && file(keystorePath).exists()) {
                 signingConfig = signingConfigs.getByName("release")
             }
             proguardFiles(
